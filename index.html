@@ -1,0 +1,1111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#c0392b">
+<title>Rummager</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root {
+    --c-unvisited: #c0392b;
+    --c-visited:   #27ae60;
+    --c-revisit:   #e67e22;
+    --c-me:        #2980b9;
+    --c-bg:        #fafafa;
+    --c-border:    #ddd;
+    --c-text:      #2c3e50;
+    --c-muted:     #777;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: var(--c-text); background: #fff; }
+  button { font: inherit; cursor: pointer; border: none; background: none; color: inherit; }
+  input, textarea, select { font: inherit; color: inherit; }
+
+  /* ── Header ── */
+  #header {
+    background: var(--c-unvisited); color: white;
+    padding: 8px 12px; display: flex; align-items: center; gap: 8px;
+    flex-shrink: 0;
+  }
+  #header h1 { font-size: 1.05rem; font-weight: 600; flex: 1; }
+  #header h1 .em { font-size: 1.2rem; margin-right: 4px; }
+  .counts { font-size: 0.72rem; opacity: 0.95; line-height: 1.1; text-align: right; }
+  .counts .row { display: flex; gap: 6px; justify-content: flex-end; }
+  .counts .pill { background: rgba(255,255,255,0.2); border-radius: 8px; padding: 1px 6px; }
+  .icon-btn { width: 38px; height: 38px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 1.1rem; background: rgba(255,255,255,0.18); color: white; }
+  .icon-btn:active { background: rgba(255,255,255,0.35); }
+
+  /* ── Filter chip row ── */
+  #chipbar {
+    display: flex; gap: 6px; padding: 6px 10px; background: #fff;
+    border-bottom: 1px solid var(--c-border); overflow-x: auto;
+    flex-shrink: 0; align-items: center;
+  }
+  .chip {
+    padding: 4px 10px; border-radius: 14px; font-size: 0.8rem;
+    border: 1px solid #ccc; background: white; white-space: nowrap;
+  }
+  .chip.active { background: var(--c-text); color: white; border-color: var(--c-text); }
+  .chip .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: 1px; }
+  #search { flex: 1; min-width: 100px; padding: 5px 9px; border: 1px solid #ccc; border-radius: 14px; font-size: 0.82rem; }
+  #sort-btn { font-size: 1rem; padding: 4px 8px; border: 1px solid #ccc; border-radius: 14px; background: white; }
+
+  /* ── Panels ── */
+  #container { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  #map-panel { flex: 1 1 50%; min-height: 0; position: relative; transition: flex-basis 0.25s; }
+  #list-panel { flex: 1 1 50%; min-height: 0; overflow-y: auto; background: var(--c-bg); border-top: 2px solid var(--c-border); transition: flex-basis 0.25s; }
+  body.map-only #list-panel { flex-basis: 0; border-top: none; overflow: hidden; }
+  body.list-only #map-panel { flex-basis: 0; }
+  body { display: flex; flex-direction: column; }
+  #map { width: 100%; height: 100%; }
+
+  /* Panel toggle bar */
+  #panel-toggles {
+    position: absolute; top: 8px; left: 8px; z-index: 600;
+    display: flex; gap: 4px;
+  }
+  #panel-toggles button {
+    background: white; border: 1px solid #aaa; border-radius: 6px;
+    padding: 4px 8px; font-size: 0.78rem; box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  }
+  #panel-toggles button.active { background: var(--c-text); color: white; border-color: var(--c-text); }
+
+  /* FAB */
+  #fab {
+    position: fixed; bottom: 16px; right: 16px; z-index: 700;
+    width: 56px; height: 56px; border-radius: 50%;
+    background: var(--c-me); color: white; font-size: 1.6rem;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    display: flex; align-items: center; justify-content: center;
+  }
+  #fab:active { transform: scale(0.95); }
+  #fab.busy { background: #888; }
+
+  /* ── List entries ── */
+  .entry {
+    padding: 9px 12px; border-bottom: 1px solid #e3e3e3;
+    display: flex; gap: 9px; align-items: flex-start;
+  }
+  .entry:active { background: #eef6fc; }
+  .entry .sw { flex-shrink: 0; width: 14px; height: 14px; border-radius: 50%; margin-top: 4px; border: 1.5px solid rgba(0,0,0,0.18); }
+  .sw.unvisited { background: var(--c-unvisited); }
+  .sw.visited   { background: var(--c-visited); }
+  .sw.revisit   { background: var(--c-revisit); }
+  .entry .body { flex: 1; min-width: 0; }
+  .entry .addr { font-weight: 600; font-size: 0.92rem; color: var(--c-text); }
+  .entry .area { font-size: 0.72rem; color: var(--c-muted); }
+  .entry .blurb { font-size: 0.78rem; color: #555; line-height: 1.35; margin-top: 2px;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .entry .badges { font-size: 0.7rem; color: var(--c-muted); margin-top: 3px; }
+  .entry .badge { display: inline-block; background: #eee; border-radius: 8px; padding: 1px 6px; margin-right: 4px; }
+  .entry .badge.note { background: #fff3cd; }
+  .entry .badge.photo { background: #d4edda; }
+  .entry .badge.dist { background: #d6eaf8; }
+  .entry .thumb {
+    width: 44px; height: 44px; border-radius: 6px; object-fit: cover;
+    flex-shrink: 0; background: #ddd;
+  }
+
+  /* ── Bottom sheet ── */
+  #sheet-bg {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.4);
+    z-index: 1000; display: none;
+  }
+  #sheet-bg.open { display: block; }
+  #sheet {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 1001;
+    background: white; border-radius: 14px 14px 0 0;
+    max-height: 92vh; overflow-y: auto;
+    transform: translateY(100%); transition: transform 0.25s;
+    padding: 14px 14px 24px;
+  }
+  #sheet.open { transform: translateY(0); }
+  #sheet .grabber { width: 40px; height: 4px; background: #ccc; border-radius: 2px; margin: 0 auto 10px; }
+  #sheet h2 { font-size: 1.1rem; margin-bottom: 8px; }
+  #sheet label { display: block; font-size: 0.78rem; color: var(--c-muted); margin-top: 10px; margin-bottom: 3px; text-transform: uppercase; letter-spacing: 0.4px; }
+  #sheet input[type=text], #sheet textarea {
+    width: 100%; padding: 8px 10px; border: 1px solid #bbb; border-radius: 6px;
+    font-size: 0.95rem;
+  }
+  #sheet textarea { resize: vertical; min-height: 70px; font-family: inherit; }
+  .status-row { display: flex; gap: 6px; margin-top: 6px; }
+  .status-row button {
+    flex: 1; padding: 9px; border-radius: 6px; font-size: 0.85rem;
+    border: 2px solid transparent; background: #eee; font-weight: 600;
+  }
+  .status-row button.unvisited.active { background: var(--c-unvisited); color: white; }
+  .status-row button.visited.active   { background: var(--c-visited); color: white; }
+  .status-row button.revisit.active   { background: var(--c-revisit); color: white; }
+  .photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 6px; margin-top: 6px; }
+  .photo-grid .ph {
+    position: relative; aspect-ratio: 1; border-radius: 6px;
+    background: #ddd; overflow: hidden;
+  }
+  .photo-grid .ph img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .photo-grid .add {
+    border: 2px dashed #aaa; display: flex; align-items: center; justify-content: center;
+    font-size: 1.6rem; color: #888; background: #fafafa;
+  }
+  .sheet-actions { display: flex; gap: 6px; margin-top: 16px; flex-wrap: wrap; }
+  .sheet-actions button {
+    flex: 1 1 calc(50% - 3px); padding: 10px; border-radius: 6px;
+    font-size: 0.88rem; font-weight: 600;
+  }
+  .btn-primary  { background: var(--c-me); color: white; }
+  .btn-secondary { background: #eee; color: var(--c-text); }
+  .btn-danger   { background: #fbecea; color: #a93226; }
+  .btn-close    { background: #ddd; color: var(--c-text); }
+
+  /* Lightbox */
+  #lightbox {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.92);
+    z-index: 2000; display: none; align-items: center; justify-content: center;
+    flex-direction: column; padding: 16px;
+  }
+  #lightbox.open { display: flex; }
+  #lightbox img { max-width: 100%; max-height: 80vh; object-fit: contain; }
+  #lightbox .lb-actions { margin-top: 14px; display: flex; gap: 10px; }
+  #lightbox button { padding: 10px 16px; border-radius: 6px; font-weight: 600; }
+
+  /* Toast */
+  #toast {
+    position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,0.85); color: white; padding: 10px 16px;
+    border-radius: 22px; font-size: 0.85rem; z-index: 3000;
+    opacity: 0; pointer-events: none; transition: opacity 0.2s;
+    max-width: 90vw; text-align: center;
+  }
+  #toast.show { opacity: 1; }
+
+  /* Live GPS dot */
+  .me-dot {
+    width: 16px; height: 16px; border-radius: 50%;
+    background: var(--c-me); border: 3px solid white;
+    box-shadow: 0 0 0 2px var(--c-me), 0 0 12px rgba(41, 128, 185, 0.6);
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%   { box-shadow: 0 0 0 2px var(--c-me), 0 0 0 0 rgba(41, 128, 185, 0.5); }
+    70%  { box-shadow: 0 0 0 2px var(--c-me), 0 0 0 16px rgba(41, 128, 185, 0); }
+    100% { box-shadow: 0 0 0 2px var(--c-me), 0 0 0 0 rgba(41, 128, 185, 0); }
+  }
+
+  /* Map popup */
+  .leaflet-popup-content { margin: 8px 10px; max-width: 240px; }
+  .pop-addr { font-weight: 700; font-size: 0.92rem; color: var(--c-text); margin-bottom: 4px; }
+  .pop-area { font-size: 0.72rem; color: var(--c-muted); margin-bottom: 4px; }
+  .pop-open { background: var(--c-me); color: white; padding: 5px 10px; border-radius: 4px; font-size: 0.8rem; font-weight: 600; }
+
+  /* Desktop layout */
+  @media (min-width: 900px) {
+    #container { flex-direction: row; }
+    #map-panel { flex-basis: 60%; }
+    #list-panel { flex-basis: 40%; max-width: 460px; border-top: none; border-left: 2px solid var(--c-border); }
+    body.map-only #list-panel { flex-basis: 0; border-left: none; }
+    body.list-only #map-panel { flex-basis: 0; }
+    #sheet { left: auto; right: 0; bottom: 0; top: 0; max-height: 100vh; max-width: 460px; border-radius: 14px 0 0 0; transform: translateX(100%); }
+    #sheet.open { transform: translateX(0); }
+  }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1><span class="em">🛒</span>Rummager</h1>
+  <div class="counts" id="counts">
+    <div class="row"><span class="pill" id="c-unvisited">— to go</span></div>
+    <div class="row"><span class="pill" id="c-visited">— done</span> <span class="pill" id="c-revisit">— ★</span></div>
+  </div>
+  <button class="icon-btn" id="btn-locate" title="Find me">📍</button>
+  <button class="icon-btn" id="btn-add-manual" title="Add address">＋</button>
+</div>
+
+<div id="chipbar">
+  <button class="chip active" data-filter="all">All</button>
+  <button class="chip" data-filter="unvisited"><span class="dot" style="background:var(--c-unvisited)"></span>To go</button>
+  <button class="chip" data-filter="visited"><span class="dot" style="background:var(--c-visited)"></span>Done</button>
+  <button class="chip" data-filter="revisit"><span class="dot" style="background:var(--c-revisit)"></span>★</button>
+  <input type="text" id="search" placeholder="Search…" />
+  <button id="sort-btn" title="Sort">⇅</button>
+</div>
+
+<div id="container">
+  <div id="map-panel">
+    <div id="map"></div>
+    <div id="panel-toggles">
+      <button id="tog-map" class="active">Map</button>
+      <button id="tog-list" class="active">List</button>
+    </div>
+  </div>
+  <div id="list-panel">
+    <div id="entries"></div>
+  </div>
+</div>
+
+<button id="fab" title="Quick add at my GPS location">📍＋</button>
+
+<!-- Bottom sheet -->
+<div id="sheet-bg"></div>
+<div id="sheet">
+  <div class="grabber"></div>
+  <div id="sheet-body"></div>
+</div>
+
+<!-- Lightbox -->
+<div id="lightbox">
+  <img id="lb-img" alt="" />
+  <div class="lb-actions">
+    <button class="btn-danger" id="lb-delete">Delete photo</button>
+    <button class="btn-close" id="lb-close">Close</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+'use strict';
+
+// ──────────────────────────────────────────────────────────────────────────
+// Seed data — 65 Belgium WI rummage sales
+// Addresses + manualCoords lifted verbatim from belgium-rummage-map.html
+// (already hand-corrected and known good).
+// Stops without manual coords will be geocoded on first run and cached.
+// ──────────────────────────────────────────────────────────────────────────
+const SEED_STOPS = [
+  { addr: "5780 Lake Church Rd", area: "Lake Church", items: "Honey, toys, books, stuffed animals, vintage home goods & décor, seasonal, kids & adults clothing, free stuff" },
+  { addr: "825 Co Rd D", area: "Lake Church", items: "Young misses small-medium, misses jeans size 4 lots, house décor, quilts, file cabinet, some men's, puzzles, baby toys, Graco play pen/sheet, lots too much to list" },
+  { addr: "300 S Royal Ave", area: "Belgium", items: "Washer, dryer, 2 freezers, 2 window air conditioners (Belgium Storage #34)" },
+  { addr: "5540 County Rd LL", area: "Town of Belgium", items: "Kids clothes, women's clothes, women's shoes, books, tools, décor, baby toys, fresh eggs, 2018 Harley Davidson" },
+  { addr: "107 N Lar-Ann St", area: "Belgium", items: "Antiques, old tools, furniture, Little Giant ladder, small appliances, women's clothing (never worn), household items, staging (Realtors note!)" },
+  { addr: "285 Highland Dr", area: "Belgium", items: "Women's clothes size 10-12 & 18-22, women shoes 7/8/9, mountain bikes, garden plants & tulip bouquets, premium woodworking pieces, household items, pets, vintage board games, Squishmallows, 2 kayaks" },
+  { addr: "229 Peter Thein Ave", area: "Belgium", items: "Table saw, Simplicity walk behind weed mower, 42\" TV, M-ATV helmet, 20\" girls bike, 20\" boys bike, scooter, home/holiday décor, puzzles, games, books, shoes, girls clothes (North Face, Lululemon, Athleta), boys clothes 10-14, men's name brand, women's, extension cords, sports gear, kitchen, drop spreader" },
+  { addr: "239 Peter Thein Ave", area: "Belgium", items: "Weight bench, TV stand, American Girl Doll accessories, kids board games, teen girl clothes S-L, ceiling fan, 6 light chandelier, red light, trampoline 14', self-cleaning litter box" },
+  { addr: "200 Park St", area: "Belgium", items: "St Mark's Church — Indoor shopping, clean bathrooms, friendly people, Bake Sale, household & misc." },
+  { addr: "336 S Lar-Ann St", area: "Belgium", items: "Lots of holiday décor including Jim Shore, Vera Bradley purses, women's shoes 9-9½ some new, women's plus size clothing, children's books, stuffed animals (Elmo), new disposable razors, girls clothing, household items" },
+  { addr: "219 S Heritage St", area: "Belgium", items: "Girls clothing 6-12, boys 4-7, women's office attire L-2XL, outdoor gas heater, shoes/boots 11-2, men's M-L, books, toys, games, household accessories" },
+  { addr: "247 S Heritage St", area: "Belgium", items: "Cast aluminum 7 pc patio dining set, 5 pc conversation set, kitchen items, furniture, 2 aluminum chaise lounge chairs" },
+  { addr: "261 S Heritage St", area: "Belgium", items: "Baby gear, puzzles/games, baby/kids clothes, toys, kitchen items, pots/pans, shoes, car seat" },
+  { addr: "307 S Heritage St", area: "Belgium", items: "Houseware goods, t-shirts, table chairs" },
+  { addr: "412 Spring St", area: "Belgium", items: "Garden décor/pots, folding chairs, patio tables, Christmas décor, Vera Bradley, Cocoa Moss Tote, weekender purse, wallet, 2 upholstered armchairs, camping cookware, women's clothing/shoes/purses, bedding, quilt" },
+  { addr: "238 Tower Dr", area: "Belgium", items: "Collectables, antiques, Lia Sophia jewelry, household, misc., too much to list" },
+  { addr: "243 Tower Dr", area: "Belgium", items: "Sofa, chairs, kitchen pots/pans/utensils, coffee tables, curio cabinet" },
+  { addr: "250 Tower Dr", area: "Belgium", items: "Handcrafted soaps, lotions, vintage tea cups & saucers, household items" },
+  { addr: "412 1st St", area: "Belgium", items: "DVDs, baseball cards, boys clothes 5-7, household, compound bows, kayak brackets for car roof, clothing, kids toys, painted furniture, lemonade & baked goods" },
+  { addr: "231 Main St", area: "Belgium", items: "Holidays — Easter, Christmas & Halloween décor, clothing, dresses (10), dresser, cabinet, craft, wreaths, flowers, Christmas mugs, baskets" },
+  { addr: "120 Pierron St", area: "Belgium", items: "Pokemon, collectible Hot Wheels, Lego minifigs, clothing, Wii games, homeschool material" },
+  { addr: "350 Main St", area: "Belgium", items: "🔥 FOOD & REFRESHMENTS — BELGIUM FIRE DEPARTMENT" },
+  { addr: "Belgium Memorial Post 412", area: "Belgium", items: "Legion Auxiliary — Snacks, chips & baked goodies" },
+  { addr: "120 Lindale St", area: "Belgium", items: "Auto mechanic tools, records, shaving mugs, beer steins, Cushman trucker, multiple misc." },
+  { addr: "126 Lindale St", area: "Belgium", items: "Dining set (table, 4 chairs & 1 bench), light fixture, boys/girls clothes all ages, adult clothes, toys, books" },
+  { addr: "424 Lindale St", area: "Belgium", items: "Household stuff, kayaks & trailer, life jackets, décor, outdoor items, dog supplies" },
+  { addr: "526 Hickory St", area: "Belgium", items: "Kids clothes, toys, household items, kitchen items, home décor, craft items" },
+  { addr: "424 Birchwood Dr", area: "Belgium", items: "Lawn mowers, snow blowers, Dewalt metal chop saw, chain saws, power tools, garden/hand tools, bikes, Thule bike carrier, home décor, crafts, games" },
+  { addr: "432 Birchwood Dr", area: "Belgium", items: "WWII steamer trunk, lamps, beer steins, collectibles, vases, odds & ends" },
+  { addr: "420 Aspen St", area: "Belgium", items: "Retired teacher classroom supplies, middle school books, classroom décor, student rewards, women's clothing all seasons, home décor, DVDs" },
+  { addr: "428 Aspen St", area: "Belgium", items: "Women's clothes XS-XL, girls 12-14, young men's S-L, housewares, holiday items, sporting goods (golf bag & clubs), toys. Open Fri 12-3, Sat 8-?" },
+  { addr: "120 East Ln", area: "Belgium", items: "Kids toys (indoor & outside), baby gear, infant-kids clothes, books, women's clothes, camping, gardening, household. Open Fri & Sat — 1st time rummage!" },
+  { addr: "424 Main St", area: "Belgium", items: "60\" tool box, small snowblower & rototiller, fishing lures & equipment, books & cookbooks, girls clothing newborn-10, girls toys, adult clothing" },
+  { addr: "502 Main St", area: "Belgium", items: "Howard Miller wall clock with chime, boys & young men's clothes, mission style dressers with mirror, media cabinet, 45 gal fish tank & accessories, 2 twin storage beds, CD player Technics 5 disc" },
+  { addr: "129 West Ln", area: "Belgium", items: "Wooden kitchen table 60\" with leaf, 4 Ethan Allen Legacy chairs, kitchen baking & misc., tools, artwork, sport items, household" },
+  { addr: "140 West Ln", area: "Belgium", items: "Tools, garden supplies, kitchen/entertaining, jewelry, dog toys, leashes, tablecloths, women's shoes, purses" },
+  { addr: "413 Park St", area: "Belgium", items: "Plants, girls clothes, women's clothes and more" },
+  { addr: "128 Lincoln Ct", area: "Belgium", items: "California Beach Co. tent, baby boy/neutral nb-2T, baby girl nb-18 month, infant toys, feeding supplies, household misc." },
+  { addr: "115 Michael St", area: "Belgium", items: "\"Something for everyone\" — women's clothing & shoes, kitchen appliances, sporting equipment, blankets & pillows, seasonal home décor, big & tall men's, home furnishings, kids stuff. *Open Thu, Fri & Sat" },
+  { addr: "116 Maple St", area: "Belgium", items: "New quilts — great graduation or wedding gifts, general rummage" },
+  { addr: "105 Chestnut St", area: "Belgium", items: "Boys toddler clothes 6-24 months, toys, men's & women's clothes, household items" },
+  { addr: "130 Chestnut St", area: "Belgium", items: "Kids clothes (multi sizes), ladies/men's clothes, 2 kitchen tables & chairs sets, pictures, craft supplies, Pocket Rocket bike, 1982 Honda Nighthawk motorcycle, motorcycle dolly, Insta Pot, golf clubs, Jeep seat covers, generator, bread maker, 4 red pop-ups, college fridge, Kohler sink, jigsaw, Harley light, Little Tykes picnic table, kids bikes, balance bike, 24v ride-on car, toys, games, books, junior XS-S, Lularoe" },
+  { addr: "125 Elm St", area: "Belgium", items: "Small kitchen appliances (juicer), vintage glassware & collectibles, cookware, lighthouse & misc. home décor, Proform space saver rower, framed pictures & posters, furniture, large selection of free items" },
+  { addr: "660 Park St", area: "Belgium", items: "Records & music CDs, toys, art, stereo equipment" },
+  { addr: "802 North St", area: "Belgium", items: "Misc. household items/décor, tools & garage items, women's/juniors S/M clothing, exercise bike, luggage, Christmas décor, beer making kit, books, puzzles, games" },
+  { addr: "115 Liberty St", area: "Belgium", items: "Misc. household items, 7 ft portable instant net (pitching & hitting), sleeping bags, sport memorabilia, grad party décor (orange & black), dorm room items, kids games & puzzles, Legos, 2017 Kawasaki Z" },
+  { addr: "914 Iyla Ave", area: "Belgium", items: "2005 Smokercraft Boat, oak storage bench, women's & men's 2X & 3X clothes, kids go cart, bear floor lamp, movies/DVDs, electric lift chair" },
+  { addr: "283 Lanna Ln", area: "Belgium", items: "Kitchen items, wall mirrors, bedding & towels, home & garden décor, sport collectibles, women's clothes (most $1) brand name, vacuums, compressor, tools, movies (DVDs/Blu-rays), CDs, office chair, Elvis albums, 45s. Open Friday" },
+  { addr: "920 S Redding Cir", area: "Belgium", items: "Furniture, décor, appliances" },
+  { addr: "244 La Roche Ln", area: "Belgium", items: "Baby/kids clothes (Kate Quinn, H&M, Target), baby items (Mamaroo, pack n play), kids toys, maternity clothes (Figs Scrubs), furniture (bed frame, loveseat), scrubs, home décor, lemonade stand" },
+  { addr: "291 La Roche Ln", area: "Belgium", items: "Abundance of toys, child's sled, baby essentials, wrap carriers, wedding/holiday/home décor, baby/toddler clothing, small exercise equipment, housewares, electric heaters, solid wood handcrafted bowls, junior/misses clothing" },
+  { addr: "304 Liege Ln", area: "Belgium", items: "Home décor, clothes, books" },
+  { addr: "316 E Redding Cir", area: "Belgium", items: "Bar stools, prom dresses, holiday décor, girls clothes, 9 ft LED slim Christmas tree, books, stuffed animals, household items" },
+  { addr: "261 Bastogne Ct", area: "Belgium", items: "Women's clothing, women's scrubs, children's toys, children's clothing, baby items, furniture" },
+  { addr: "262 Bastogne Ct", area: "Belgium", items: "Household goods, men/women/kids clothes, furniture, household décor & more" },
+  { addr: "304 Louvain Ln", area: "Belgium", items: "Household items, books, boys clothing, women's clothing, Thirty One bags & items, waterfowl gear, antique fishing lures, fishing poles, tool boxes" },
+  { addr: "361 N Redding Cir", area: "Belgium", items: "Baby items & clothes, misc. household, bedding" },
+  { addr: "372 N Redding Cir", area: "Belgium", items: "Ooni Koda 2 (24\") max pizza oven, household goods, kitchen goods" },
+  { addr: "105 Rose Ln", area: "Belgium", items: "House plants, yard plants, women's clothes, household items" },
+  { addr: "221 Lilac Ln", area: "Belgium", items: "Household items, home décor, end tables, lamps, dining chairs, TV stand, snowblower, women's clothes, boys clothes, toys & games" },
+  { addr: "287 Goschey Dr", area: "Belgium", items: "0-3T boy clothes, baby items, baby/kid toys, nursery glider (new), wood kitchen table, girls clothes, women's clothes/accessories, household décor" },
+  { addr: "969 Goschey Dr", area: "Belgium", items: "Metal patio table, 4 chairs, Halloween décor/lawn inflatables, vintage Barbie camper, golf clubs, cushion floor mats, large modern area rug (like new), outdoor game set (new)" },
+  { addr: "311 Log Cabin Ln", area: "Belgium", items: "Tree stands, decoys, new mountain bike, round kitchen table w/4 chairs, Jeep soft top (Wrangler JK 4 door), juniors & women's clothing, household, Disney collectibles, Harley Davidson items" },
+  { addr: "1734 Co Rd D", area: "Town of Belgium", items: "Furniture, tools, antiques, clothing, housewares, glassware, Howard Miller Clock, books" },
+];
+
+// Manual coordinates lifted from belgium-rummage-map.html for stops Nominatim missed
+const MANUAL_COORDS = {
+  "825 Co Rd D":              { lat: 43.499455, lon: -87.824076 },
+  "1734 Co Rd D":             { lat: 43.499551, lon: -87.871202 },
+  "5540 County Rd LL":        { lat: 43.479559, lon: -87.840242 },
+  "5780 Lake Church Rd":      { lat: 43.499500, lon: -87.820700 },
+  "412 1st St":               { lat: 43.495870, lon: -87.841877 },
+  "116 Maple St":             { lat: 43.499200, lon: -87.847455 },
+  "300 S Royal Ave":          { lat: 43.498600, lon: -87.835200 },
+  "350 Main St":              { lat: 43.500500, lon: -87.840100 },
+  "Belgium Memorial Post 412":{ lat: 43.499700, lon: -87.849000 },
+};
+
+// ──────────────────────────────────────────────────────────────────────────
+// Storage layer
+// ──────────────────────────────────────────────────────────────────────────
+const STORAGE_KEY = 'rummager.v1';
+const SCHEMA_VERSION = 1;
+let state = { version: SCHEMA_VERSION, stops: [] };
+
+function uid() {
+  return 'r-' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+}
+
+function load() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.version === SCHEMA_VERSION && Array.isArray(parsed.stops)) {
+        state = parsed;
+        return;
+      }
+    }
+  } catch (e) {
+    console.warn('Storage load failed, reseeding:', e);
+  }
+  // First run — seed
+  state = { version: SCHEMA_VERSION, stops: [] };
+  const now = Date.now();
+  SEED_STOPS.forEach((s, i) => {
+    const mc = MANUAL_COORDS[s.addr];
+    state.stops.push({
+      id: 'seed-' + i,
+      addr: s.addr,
+      area: s.area || '',
+      items: s.items || '',
+      lat: mc ? mc.lat : null,
+      lon: mc ? mc.lon : null,
+      source: 'preloaded',
+      status: 'unvisited',
+      note: '',
+      photos: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+  });
+  save();
+}
+
+let saveTimer = null;
+function save() {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try {
+      const json = JSON.stringify(state);
+      localStorage.setItem(STORAGE_KEY, json);
+      // Soft warning when approaching cap
+      if (json.length > 4 * 1024 * 1024) {
+        toast(`⚠️ Storage at ${(json.length / 1024 / 1024).toFixed(1)} MB / ~5 MB. Consider trimming photos.`);
+      }
+    } catch (e) {
+      toast('❌ Save failed — storage full. Delete some photos.');
+      console.error(e);
+    }
+  }, 200);
+}
+
+function findStop(id) { return state.stops.find(s => s.id === id); }
+
+// ──────────────────────────────────────────────────────────────────────────
+// Map setup
+// ──────────────────────────────────────────────────────────────────────────
+const map = L.map('map', { zoomControl: true, tap: true }).setView([43.4997, -87.8504], 14);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap',
+  maxZoom: 19,
+}).addTo(map);
+
+const markersById = {};
+let meMarker = null;
+let watchId = null;
+let lastKnownPos = null; // { lat, lon }
+
+function makeIcon(status) {
+  const color = status === 'visited' ? 'var(--c-visited)'
+              : status === 'revisit' ? 'var(--c-revisit)'
+              : 'var(--c-unvisited)';
+  // resolve CSS var to actual color
+  const cssColor = getComputedStyle(document.documentElement).getPropertyValue(
+    status === 'visited' ? '--c-visited' : status === 'revisit' ? '--c-revisit' : '--c-unvisited'
+  ).trim() || '#c0392b';
+  const glyph = status === 'visited' ? '✓' : status === 'revisit' ? '★' : '';
+  return L.divIcon({
+    className: 'rm-marker',
+    html: `<svg width="28" height="42" viewBox="0 0 28 42" xmlns="http://www.w3.org/2000/svg">
+      <path d="M14 0C6.3 0 0 6.3 0 14c0 10.5 14 28 14 28s14-17.5 14-28C28 6.3 21.7 0 14 0z" fill="${cssColor}" stroke="#222" stroke-width="1"/>
+      <circle cx="14" cy="14" r="6" fill="#fff"/>
+      <text x="14" y="17.5" text-anchor="middle" font-size="9" font-weight="bold" fill="${cssColor}">${glyph}</text>
+    </svg>`,
+    iconSize: [28, 42],
+    iconAnchor: [14, 42],
+    popupAnchor: [0, -38],
+  });
+}
+
+function popupHtml(stop) {
+  return `<div class="pop-addr">${escapeHtml(stop.addr)}</div>
+    ${stop.area && stop.area !== 'Belgium' ? `<div class="pop-area">${escapeHtml(stop.area)}</div>` : ''}
+    <button class="pop-open" data-open-id="${stop.id}">Open details</button>`;
+}
+
+function ensureMarker(stop) {
+  if (stop.lat == null || stop.lon == null) return;
+  let m = markersById[stop.id];
+  if (m) {
+    m.setLatLng([stop.lat, stop.lon]);
+    m.setIcon(makeIcon(stop.status));
+    m.setPopupContent(popupHtml(stop));
+  } else {
+    m = L.marker([stop.lat, stop.lon], { icon: makeIcon(stop.status) }).addTo(map);
+    m.bindPopup(popupHtml(stop));
+    m.on('popupopen', (e) => {
+      const btn = e.popup._contentNode.querySelector('[data-open-id]');
+      if (btn) btn.addEventListener('click', () => { map.closePopup(); openSheet(stop.id); });
+    });
+    markersById[stop.id] = m;
+  }
+}
+
+function removeMarker(id) {
+  const m = markersById[id];
+  if (m) { map.removeLayer(m); delete markersById[id]; }
+}
+
+function refreshAllMarkers() {
+  // Add/update markers for stops with coords
+  state.stops.forEach(ensureMarker);
+  // Remove markers whose stops were deleted
+  Object.keys(markersById).forEach(id => {
+    if (!findStop(id)) removeMarker(id);
+  });
+}
+
+function fitToMarkers() {
+  const layers = Object.values(markersById);
+  if (layers.length === 0) return;
+  const group = L.featureGroup(layers);
+  map.fitBounds(group.getBounds().pad(0.1));
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Geocoding (same chain as belgium-rummage-map.html)
+// ──────────────────────────────────────────────────────────────────────────
+const NOMINATIM_UA = 'Rummager/1.0 (https://big-ticket-ryan.github.io/rummager)';
+
+async function nominatimSearch(query) {
+  const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1&countrycodes=us`;
+  const resp = await fetch(url, { headers: { 'Accept': 'application/json' } });
+  return resp.json();
+}
+
+async function censusGeocode(addr) {
+  const fullAddr = addr + ', Belgium, WI 53004';
+  const url = `https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address=${encodeURIComponent(fullAddr)}&benchmark=Public_AR_Current&format=json`;
+  try {
+    const resp = await fetch(url);
+    const data = await resp.json();
+    const matches = data?.result?.addressMatches;
+    if (matches && matches.length > 0) {
+      return { lat: matches[0].coordinates.y, lon: matches[0].coordinates.x };
+    }
+  } catch (e) { /* ignore */ }
+  return null;
+}
+
+async function reverseGeocode(lat, lon) {
+  const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`;
+  try {
+    const resp = await fetch(url, { headers: { 'Accept': 'application/json' } });
+    const data = await resp.json();
+    if (data && data.address) {
+      const a = data.address;
+      const num = a.house_number || '';
+      const road = a.road || '';
+      return `${num} ${road}`.trim() || data.display_name?.split(',')[0] || '';
+    }
+  } catch (e) { /* ignore */ }
+  return '';
+}
+
+async function geocodeAddress(addr, area) {
+  const a = (area || 'Belgium');
+  let q = addr + (a === 'Lake Church' ? ', Lake Church, Ozaukee County, WI'
+              : a === 'Town of Belgium' ? ', Town of Belgium, Ozaukee County, WI'
+              : ', Belgium, Ozaukee County, WI');
+  let data = await nominatimSearch(q);
+  if (data.length === 0) data = await nominatimSearch(addr + ', Ozaukee County, WI');
+  if (data.length === 0 && /co\s+rd\b/i.test(addr)) {
+    data = await nominatimSearch(addr.replace(/co\s+rd\b/i, 'County Road') + ', Ozaukee County, WI');
+  }
+  if (data.length > 0) {
+    return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
+  }
+  return await censusGeocode(addr);
+}
+
+// First-run geocode for any preloaded stop missing coords
+async function geocodeMissingSeeds() {
+  const missing = state.stops.filter(s => s.source === 'preloaded' && (s.lat == null || s.lon == null));
+  if (missing.length === 0) return;
+  toast(`Geocoding ${missing.length} preloaded stops…`);
+  for (let i = 0; i < missing.length; i++) {
+    const s = missing[i];
+    try {
+      const r = await geocodeAddress(s.addr, s.area);
+      if (r) { s.lat = r.lat; s.lon = r.lon; ensureMarker(s); }
+    } catch (e) { console.warn('geocode failed for', s.addr, e); }
+    await new Promise(r => setTimeout(r, 1100)); // Nominatim rate limit
+  }
+  save();
+  renderList();
+  fitToMarkers();
+  toast('Geocoding done.');
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// List rendering
+// ──────────────────────────────────────────────────────────────────────────
+const $entries = document.getElementById('entries');
+const $search = document.getElementById('search');
+const $counts = {
+  unvisited: document.getElementById('c-unvisited'),
+  visited:   document.getElementById('c-visited'),
+  revisit:   document.getElementById('c-revisit'),
+};
+let activeFilter = 'all';
+let sortMode = 'default'; // 'default' | 'status' | 'distance'
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function haversineMiles(lat1, lon1, lat2, lon2) {
+  const R = 3958.8;
+  const toRad = d => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1), dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+function getFilteredStops() {
+  const q = $search.value.trim().toLowerCase();
+  let arr = state.stops.filter(s => {
+    if (activeFilter !== 'all' && s.status !== activeFilter) return false;
+    if (q) {
+      const hay = (s.addr + ' ' + s.area + ' ' + s.items + ' ' + s.note).toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+  if (sortMode === 'status') {
+    const order = { revisit: 0, unvisited: 1, visited: 2 };
+    arr.sort((a, b) => (order[a.status] - order[b.status]) || a.addr.localeCompare(b.addr));
+  } else if (sortMode === 'distance' && lastKnownPos) {
+    arr.sort((a, b) => {
+      const da = (a.lat == null) ? Infinity : haversineMiles(lastKnownPos.lat, lastKnownPos.lon, a.lat, a.lon);
+      const db = (b.lat == null) ? Infinity : haversineMiles(lastKnownPos.lat, lastKnownPos.lon, b.lat, b.lon);
+      return da - db;
+    });
+  }
+  return arr;
+}
+
+function renderCounts() {
+  let u = 0, v = 0, r = 0;
+  state.stops.forEach(s => {
+    if (s.status === 'visited') v++;
+    else if (s.status === 'revisit') r++;
+    else u++;
+  });
+  $counts.unvisited.textContent = `${u} to go`;
+  $counts.visited.textContent = `${v} done`;
+  $counts.revisit.textContent = `${r} ★`;
+}
+
+function renderList() {
+  renderCounts();
+  const arr = getFilteredStops();
+  $entries.innerHTML = '';
+  const frag = document.createDocumentFragment();
+  arr.forEach(s => {
+    const div = document.createElement('div');
+    div.className = 'entry';
+    const blurb = (s.note || s.items || '').slice(0, 140);
+    const dist = (sortMode === 'distance' && lastKnownPos && s.lat != null)
+      ? haversineMiles(lastKnownPos.lat, lastKnownPos.lon, s.lat, s.lon).toFixed(1) + ' mi'
+      : null;
+    div.innerHTML = `
+      ${s.photos[0] ? `<img class="thumb" src="${s.photos[0]}" alt="">` : ''}
+      <span class="sw ${s.status}"></span>
+      <div class="body">
+        <div class="addr">${escapeHtml(s.addr)}</div>
+        ${s.area && s.area !== 'Belgium' ? `<div class="area">${escapeHtml(s.area)}</div>` : ''}
+        ${blurb ? `<div class="blurb">${escapeHtml(blurb)}</div>` : ''}
+        <div class="badges">
+          ${s.note   ? `<span class="badge note">📝 note</span>` : ''}
+          ${s.photos.length ? `<span class="badge photo">📷 ${s.photos.length}</span>` : ''}
+          ${dist     ? `<span class="badge dist">${dist}</span>` : ''}
+          ${s.source !== 'preloaded' ? `<span class="badge">added</span>` : ''}
+        </div>
+      </div>
+    `;
+    div.addEventListener('click', () => openSheet(s.id));
+    frag.appendChild(div);
+  });
+  $entries.appendChild(frag);
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Bottom sheet
+// ──────────────────────────────────────────────────────────────────────────
+const $sheet = document.getElementById('sheet');
+const $sheetBg = document.getElementById('sheet-bg');
+const $sheetBody = document.getElementById('sheet-body');
+let openSheetId = null;
+
+function openSheet(id) {
+  openSheetId = id;
+  const s = findStop(id);
+  if (!s) return;
+  $sheetBody.innerHTML = renderSheet(s);
+  $sheetBg.classList.add('open');
+  $sheet.classList.add('open');
+  wireSheet(s);
+
+  // Pan map to marker
+  if (s.lat != null) {
+    map.setView([s.lat, s.lon], Math.max(map.getZoom(), 16));
+    const m = markersById[s.id];
+    if (m) setTimeout(() => m.openPopup(), 200);
+  }
+}
+
+function closeSheet() {
+  $sheet.classList.remove('open');
+  $sheetBg.classList.remove('open');
+  openSheetId = null;
+}
+
+function renderSheet(s) {
+  const isPreloaded = s.source === 'preloaded';
+  return `
+    <h2>${escapeHtml(s.addr) || 'Unnamed stop'}</h2>
+    <label>Status</label>
+    <div class="status-row">
+      <button class="unvisited ${s.status==='unvisited'?'active':''}" data-status="unvisited">Unvisited</button>
+      <button class="visited ${s.status==='visited'?'active':''}" data-status="visited">Visited ✓</button>
+      <button class="revisit ${s.status==='revisit'?'active':''}" data-status="revisit">Revisit ★</button>
+    </div>
+
+    <label>Address</label>
+    <input type="text" id="f-addr" value="${escapeHtml(s.addr)}" />
+
+    <label>Area</label>
+    <input type="text" id="f-area" value="${escapeHtml(s.area)}" />
+
+    <label>Note</label>
+    <textarea id="f-note" placeholder="Add a personal note…">${escapeHtml(s.note)}</textarea>
+
+    ${isPreloaded ? `<label>Items (from flyer)</label>
+      <textarea id="f-items">${escapeHtml(s.items)}</textarea>` : ''}
+
+    <label>Photos (${s.photos.length})</label>
+    <div class="photo-grid" id="photo-grid">
+      ${s.photos.map((p, i) => `<div class="ph" data-photo-idx="${i}"><img src="${p}" alt=""></div>`).join('')}
+      <label class="ph add" for="f-photo">＋
+        <input type="file" id="f-photo" accept="image/*" capture="environment" style="display:none">
+      </label>
+    </div>
+
+    <div class="sheet-actions">
+      ${s.lat != null ? `<button class="btn-primary" id="b-nav">🧭 Navigate</button>` : ''}
+      <button class="btn-secondary" id="b-save">Save</button>
+      ${!isPreloaded ? `<button class="btn-danger" id="b-del">Delete</button>` : ''}
+      <button class="btn-close" id="b-close">Close</button>
+    </div>
+  `;
+}
+
+function wireSheet(s) {
+  // Status buttons
+  $sheetBody.querySelectorAll('.status-row button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const newStatus = btn.dataset.status;
+      s.status = newStatus;
+      s.updatedAt = Date.now();
+      $sheetBody.querySelectorAll('.status-row button').forEach(b => b.classList.toggle('active', b === btn));
+      ensureMarker(s);
+      save();
+      renderList();
+    });
+  });
+
+  // Note autosave
+  const $note = $sheetBody.querySelector('#f-note');
+  $note.addEventListener('blur', () => {
+    if (s.note !== $note.value) { s.note = $note.value; s.updatedAt = Date.now(); save(); renderList(); }
+  });
+
+  // Save button
+  $sheetBody.querySelector('#b-save').addEventListener('click', async () => {
+    const newAddr = $sheetBody.querySelector('#f-addr').value.trim();
+    const newArea = $sheetBody.querySelector('#f-area').value.trim();
+    const newNote = $sheetBody.querySelector('#f-note').value;
+    const itemsEl = $sheetBody.querySelector('#f-items');
+    const newItems = itemsEl ? itemsEl.value : s.items;
+    const addrChanged = newAddr !== s.addr;
+    s.addr = newAddr; s.area = newArea; s.note = newNote; s.items = newItems;
+    s.updatedAt = Date.now();
+    save(); renderList();
+    if (addrChanged && newAddr) {
+      toast('Re-geocoding…');
+      const r = await geocodeAddress(newAddr, newArea);
+      if (r) { s.lat = r.lat; s.lon = r.lon; ensureMarker(s); save(); toast('Address relocated.'); }
+      else toast('Could not geocode new address.');
+    }
+    closeSheet();
+  });
+
+  // Delete
+  const delBtn = $sheetBody.querySelector('#b-del');
+  if (delBtn) {
+    delBtn.addEventListener('click', () => {
+      if (!confirm('Delete this stop?')) return;
+      removeMarker(s.id);
+      state.stops = state.stops.filter(x => x.id !== s.id);
+      save(); renderList(); closeSheet();
+    });
+  }
+
+  // Close
+  $sheetBody.querySelector('#b-close').addEventListener('click', closeSheet);
+
+  // Navigate
+  const navBtn = $sheetBody.querySelector('#b-nav');
+  if (navBtn) {
+    navBtn.addEventListener('click', () => {
+      window.open(`https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lon}`, '_blank');
+    });
+  }
+
+  // Photo input
+  const $photoInput = $sheetBody.querySelector('#f-photo');
+  $photoInput.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      toast('Compressing photo…');
+      const dataUrl = await compressImage(file);
+      s.photos.push(dataUrl);
+      s.updatedAt = Date.now();
+      save();
+      // Re-render sheet to show new thumb
+      $sheetBody.innerHTML = renderSheet(s);
+      wireSheet(s);
+      renderList();
+    } catch (err) {
+      toast('Photo failed: ' + err.message);
+    }
+  });
+
+  // Photo thumbs → lightbox
+  $sheetBody.querySelectorAll('[data-photo-idx]').forEach(el => {
+    el.addEventListener('click', () => openLightbox(s.id, parseInt(el.dataset.photoIdx, 10)));
+  });
+}
+
+$sheetBg.addEventListener('click', closeSheet);
+
+// ──────────────────────────────────────────────────────────────────────────
+// Image compression
+// ──────────────────────────────────────────────────────────────────────────
+function compressImage(file, maxEdge = 1280, quality = 0.7) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('read failed'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('decode failed'));
+      img.onload = () => {
+        let { width, height } = img;
+        const scale = Math.min(1, maxEdge / Math.max(width, height));
+        width = Math.round(width * scale);
+        height = Math.round(height * scale);
+        const canvas = document.createElement('canvas');
+        canvas.width = width; canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        try {
+          resolve(canvas.toDataURL('image/jpeg', quality));
+        } catch (e) { reject(e); }
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Lightbox
+// ──────────────────────────────────────────────────────────────────────────
+const $lb = document.getElementById('lightbox');
+const $lbImg = document.getElementById('lb-img');
+let lbStopId = null, lbIdx = -1;
+
+function openLightbox(stopId, idx) {
+  const s = findStop(stopId);
+  if (!s || !s.photos[idx]) return;
+  lbStopId = stopId; lbIdx = idx;
+  $lbImg.src = s.photos[idx];
+  $lb.classList.add('open');
+}
+function closeLightbox() { $lb.classList.remove('open'); lbStopId = null; lbIdx = -1; }
+document.getElementById('lb-close').addEventListener('click', closeLightbox);
+document.getElementById('lb-delete').addEventListener('click', () => {
+  if (lbStopId == null) return;
+  const s = findStop(lbStopId);
+  if (s && confirm('Delete this photo?')) {
+    s.photos.splice(lbIdx, 1);
+    s.updatedAt = Date.now();
+    save();
+    if (openSheetId === s.id) { $sheetBody.innerHTML = renderSheet(s); wireSheet(s); }
+    renderList();
+    closeLightbox();
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// Filter chips, search, sort, panel toggles
+// ──────────────────────────────────────────────────────────────────────────
+document.querySelectorAll('.chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    document.querySelectorAll('.chip').forEach(c => c.classList.toggle('active', c === chip));
+    activeFilter = chip.dataset.filter;
+    renderList();
+  });
+});
+
+let searchT;
+$search.addEventListener('input', () => {
+  clearTimeout(searchT); searchT = setTimeout(renderList, 120);
+});
+
+document.getElementById('sort-btn').addEventListener('click', () => {
+  const modes = ['default', 'status', 'distance'];
+  sortMode = modes[(modes.indexOf(sortMode) + 1) % modes.length];
+  toast('Sort: ' + sortMode + (sortMode === 'distance' && !lastKnownPos ? ' (need GPS first — tap 📍)' : ''));
+  renderList();
+});
+
+document.getElementById('tog-map').addEventListener('click', () => {
+  if (document.body.classList.contains('list-only')) {
+    document.body.classList.remove('list-only');
+  } else {
+    document.body.classList.toggle('map-only');
+  }
+  syncPanelToggleStyles();
+  setTimeout(() => map.invalidateSize(), 280);
+});
+document.getElementById('tog-list').addEventListener('click', () => {
+  if (document.body.classList.contains('map-only')) {
+    document.body.classList.remove('map-only');
+  } else {
+    document.body.classList.toggle('list-only');
+  }
+  syncPanelToggleStyles();
+  setTimeout(() => map.invalidateSize(), 280);
+});
+function syncPanelToggleStyles() {
+  const mapOnly = document.body.classList.contains('map-only');
+  const listOnly = document.body.classList.contains('list-only');
+  document.getElementById('tog-map').classList.toggle('active', !listOnly);
+  document.getElementById('tog-list').classList.toggle('active', !mapOnly);
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Geolocation
+// ──────────────────────────────────────────────────────────────────────────
+function startWatching() {
+  if (!navigator.geolocation) { toast('Geolocation not supported.'); return; }
+  if (watchId != null) return;
+  watchId = navigator.geolocation.watchPosition(
+    (pos) => {
+      lastKnownPos = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+      if (!meMarker) {
+        meMarker = L.marker([lastKnownPos.lat, lastKnownPos.lon], {
+          icon: L.divIcon({ className: '', html: '<div class="me-dot"></div>', iconSize: [16, 16], iconAnchor: [8, 8] }),
+          interactive: false, zIndexOffset: 9999,
+        }).addTo(map);
+      } else {
+        meMarker.setLatLng([lastKnownPos.lat, lastKnownPos.lon]);
+      }
+    },
+    (err) => {
+      toast('GPS error: ' + err.message);
+      console.warn(err);
+    },
+    { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
+  );
+}
+
+document.getElementById('btn-locate').addEventListener('click', () => {
+  startWatching();
+  if (lastKnownPos) {
+    map.setView([lastKnownPos.lat, lastKnownPos.lon], 16);
+  } else {
+    toast('Locating…');
+    navigator.geolocation.getCurrentPosition(
+      (pos) => { map.setView([pos.coords.latitude, pos.coords.longitude], 16); },
+      (err) => toast('GPS error: ' + err.message),
+      { enableHighAccuracy: true, timeout: 15000 }
+    );
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// Add address — manual
+// ──────────────────────────────────────────────────────────────────────────
+function openAddSheet({ lat = null, lon = null, prefilledAddr = '', defaultStatus = 'unvisited' } = {}) {
+  openSheetId = '__new';
+  $sheetBody.innerHTML = `
+    <h2>Add stop</h2>
+    <label>Address</label>
+    <input type="text" id="n-addr" placeholder="123 Main St" value="${escapeHtml(prefilledAddr)}">
+    <label>Area (optional)</label>
+    <input type="text" id="n-area" placeholder="Belgium">
+    <label>Note</label>
+    <textarea id="n-note" placeholder="Why noteworthy?"></textarea>
+    <label>Status</label>
+    <div class="status-row">
+      <button class="unvisited ${defaultStatus==='unvisited'?'active':''}" data-status="unvisited">Unvisited</button>
+      <button class="visited ${defaultStatus==='visited'?'active':''}" data-status="visited">Visited ✓</button>
+      <button class="revisit ${defaultStatus==='revisit'?'active':''}" data-status="revisit">Revisit ★</button>
+    </div>
+    <div class="sheet-actions">
+      <button class="btn-primary" id="n-save">Save</button>
+      <button class="btn-close" id="n-close">Cancel</button>
+    </div>
+    ${lat != null ? `<div style="margin-top:10px; font-size:0.78rem; color:var(--c-muted)">📍 Using GPS coords ${lat.toFixed(5)}, ${lon.toFixed(5)}</div>` : ''}
+  `;
+  $sheetBg.classList.add('open');
+  $sheet.classList.add('open');
+
+  let chosenStatus = defaultStatus;
+  $sheetBody.querySelectorAll('.status-row button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      chosenStatus = btn.dataset.status;
+      $sheetBody.querySelectorAll('.status-row button').forEach(b => b.classList.toggle('active', b === btn));
+    });
+  });
+
+  $sheetBody.querySelector('#n-close').addEventListener('click', closeSheet);
+  $sheetBody.querySelector('#n-save').addEventListener('click', async () => {
+    const addr = $sheetBody.querySelector('#n-addr').value.trim();
+    const area = $sheetBody.querySelector('#n-area').value.trim();
+    const note = $sheetBody.querySelector('#n-note').value;
+    if (!addr && lat == null) { toast('Need an address or GPS coords.'); return; }
+
+    let coords = (lat != null) ? { lat, lon } : null;
+    if (!coords) {
+      toast('Geocoding…');
+      coords = await geocodeAddress(addr, area);
+      if (!coords) { toast('Could not geocode. Saving without coords — long-press map to place pin later.'); }
+    }
+    const now = Date.now();
+    const stop = {
+      id: uid(),
+      addr: addr || `Pin ${new Date(now).toLocaleTimeString()}`,
+      area, items: '',
+      lat: coords ? coords.lat : null,
+      lon: coords ? coords.lon : null,
+      source: lat != null ? 'gps' : 'manual',
+      status: chosenStatus, note, photos: [],
+      createdAt: now, updatedAt: now,
+    };
+    state.stops.push(stop);
+    save(); ensureMarker(stop); renderList();
+    closeSheet();
+    if (stop.lat != null) map.setView([stop.lat, stop.lon], 17);
+    toast('Stop added.');
+  });
+}
+
+document.getElementById('btn-add-manual').addEventListener('click', () => openAddSheet());
+
+// ──────────────────────────────────────────────────────────────────────────
+// FAB — GPS quick-add
+// ──────────────────────────────────────────────────────────────────────────
+const $fab = document.getElementById('fab');
+$fab.addEventListener('click', async () => {
+  if (!navigator.geolocation) { toast('Geolocation not supported.'); return; }
+  $fab.classList.add('busy');
+  toast('Getting GPS fix…');
+  navigator.geolocation.getCurrentPosition(
+    async (pos) => {
+      const lat = pos.coords.latitude, lon = pos.coords.longitude;
+      lastKnownPos = { lat, lon };
+      startWatching();
+      // Reverse-geocode for prefill
+      const guess = await reverseGeocode(lat, lon);
+      $fab.classList.remove('busy');
+      openAddSheet({ lat, lon, prefilledAddr: guess, defaultStatus: 'visited' });
+    },
+    (err) => {
+      $fab.classList.remove('busy');
+      toast('GPS error: ' + err.message);
+    },
+    { enableHighAccuracy: true, timeout: 20000 }
+  );
+});
+
+// Long-press map to drop a pin manually (helps when geocode fails)
+let pressTimer = null;
+map.on('contextmenu', (e) => {
+  openAddSheet({ lat: e.latlng.lat, lon: e.latlng.lng, defaultStatus: 'unvisited' });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// Toast
+// ──────────────────────────────────────────────────────────────────────────
+let toastTimer = null;
+function toast(msg) {
+  const $t = document.getElementById('toast');
+  $t.textContent = msg;
+  $t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => $t.classList.remove('show'), 2800);
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Boot
+// ──────────────────────────────────────────────────────────────────────────
+load();
+refreshAllMarkers();
+renderList();
+fitToMarkers();
+syncPanelToggleStyles();
+
+// Kick off background geocode for any missing seed coords
+setTimeout(geocodeMissingSeeds, 800);
+
+// On any storage change in another tab (rare on phones), reload
+window.addEventListener('storage', (e) => {
+  if (e.key === STORAGE_KEY) { load(); refreshAllMarkers(); renderList(); }
+});
+</script>
+</body>
+</html>
