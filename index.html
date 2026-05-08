@@ -146,6 +146,17 @@
   .member-row .age  { font-size: 0.72rem; color: var(--c-muted); }
   .member-row .me-tag { font-size: 0.7rem; background: var(--c-me); color: white; padding: 1px 6px; border-radius: 8px; }
 
+  /* Recenter button on map */
+  #map-recenter {
+    position: absolute; bottom: 16px; left: 12px; z-index: 600;
+    width: 44px; height: 44px; border-radius: 50%;
+    background: white; color: var(--c-me); font-size: 1.3rem;
+    border: 1px solid #aaa; box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+    display: flex; align-items: center; justify-content: center;
+  }
+  #map-recenter:active { transform: scale(0.95); }
+  #map-recenter.disabled { opacity: 0.45; }
+
   /* FAB */
   #fab {
     position: fixed; bottom: 16px; right: 16px; z-index: 700;
@@ -321,6 +332,7 @@
 <div id="container">
   <div id="map-panel">
     <div id="map"></div>
+    <button id="map-recenter" title="Recenter on me">🎯</button>
   </div>
   <div id="list-panel">
     <div id="entries"></div>
@@ -746,7 +758,7 @@ function renderList() {
         </div>
       </div>
     `;
-    div.addEventListener('click', () => openSheet(s.id));
+    div.addEventListener('click', () => focusStopOnMap(s.id));
     frag.appendChild(div);
   });
   $entries.appendChild(frag);
@@ -775,6 +787,16 @@ function openSheet(id) {
     const m = markersById[s.id];
     if (m) setTimeout(() => m.openPopup(), 200);
   }
+}
+
+// Pan/zoom map to a stop and open its marker popup, without opening the
+// details bottom sheet. Triggered from list-row clicks.
+function focusStopOnMap(id) {
+  const s = findStop(id);
+  if (!s || s.lat == null) return;
+  map.setView([s.lat, s.lon], Math.max(map.getZoom(), 16));
+  const m = markersById[s.id];
+  if (m) setTimeout(() => m.openPopup(), 200);
 }
 
 function closeSheet() {
@@ -1105,6 +1127,12 @@ document.getElementById('btn-locate').addEventListener('click', () => {
   if (!gpsEnabled) { startWatching({ center: true }); return; }
   if (lastKnownPos) map.setView([lastKnownPos.lat, lastKnownPos.lon], 16);
   else toast('Locating…');
+});
+
+document.getElementById('map-recenter').addEventListener('click', () => {
+  if (!gpsEnabled) { startWatching({ center: true }); return; }
+  if (lastKnownPos) map.setView([lastKnownPos.lat, lastKnownPos.lon], 16);
+  else toast('Waiting for GPS fix…');
 });
 
 // ──────────────────────────────────────────────────────────────────────────
