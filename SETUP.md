@@ -95,3 +95,84 @@ GitHub Pages republishes automatically in ~30 seconds. **The URL never changes.*
   - Camera (when you tap "+" inside the photo grid). Says "no" → can still pick from gallery.
 - **Storage cap:** ~5 MB. Photos are auto-compressed (~200 KB each) so you can fit ~20+ photos before any warning.
 - **No "reset" button.** If you ever want to wipe data, in Chrome: Settings → Site Settings → search `big-ticket-ryan.github.io` → Clear data.
+
+---
+
+## v2.1 — Group location sharing (Firebase)
+
+Group sharing is **opt-in** and **off by default**. The app still works fully without it. To enable, do these one-time steps:
+
+### 1. Create a Firebase project
+
+1. https://console.firebase.google.com/ → **Add project** → name `rummager` → disable Analytics → Create.
+2. Project overview → ⚙️ **Project settings** → **Your apps** → click `</>` (Web) → nickname `rummager-web` → **don't** enable Hosting → **Register app**.
+3. Copy the `firebaseConfig` object shown (you can also find it later under Project settings → General → SDK setup and configuration → Config).
+
+### 2. Enable Anonymous Auth + Realtime Database
+
+- Left sidebar → **Build → Authentication** → Get started → **Sign-in method** → enable **Anonymous**.
+- Left sidebar → **Build → Realtime Database** → Create database → US region → Start in **locked mode**.
+- Open the **Rules** tab and paste:
+
+  ```json
+  {
+    "rules": {
+      "groups": {
+        "$code": {
+          ".read": "auth != null",
+          "members": {
+            "$uid": {
+              ".write": "auth != null && auth.uid === $uid",
+              ".validate": "newData.hasChildren(['name','lat','lon','updatedAt'])"
+            }
+          },
+          "meta": { ".write": "auth != null" }
+        }
+      }
+    }
+  }
+  ```
+
+  Click **Publish**.
+
+- Authentication → **Settings → Authorized domains** → add `big-ticket-ryan.github.io` if not already listed.
+
+### 3. Paste the config into `index.html`
+
+Find this line near the bottom of the script in `index.html`:
+
+```js
+const FIREBASE_CONFIG = null; // e.g. { apiKey: "...", authDomain: "...", databaseURL: "...", projectId: "..." }
+```
+
+Replace `null` with the object Firebase gave you, e.g.:
+
+```js
+const FIREBASE_CONFIG = {
+  apiKey: "AIza…",
+  authDomain: "rummager-xxxx.firebaseapp.com",
+  databaseURL: "https://rummager-xxxx-default-rtdb.firebaseio.com",
+  projectId: "rummager-xxxx",
+  storageBucket: "rummager-xxxx.appspot.com",
+  messagingSenderId: "…",
+  appId: "1:…:web:…"
+};
+```
+
+Commit and push. Group sharing is now live.
+
+### 4. Using groups
+
+- Tap **👥** in the header.
+- Enter your display name.
+- Tap **Create new group** → you'll get a 6-char code like `BLG-K9X`. Tap **Invite** to share via your phone's share sheet (or it's copied to clipboard as a fallback).
+- Friends tap the invite link or open Rummager → 👥 → enter the code → **Join group**.
+- Each member taps **Share my location** to start broadcasting. The blue banner across the top is always visible while you're sharing — tap **Stop** anywhere to stop. Sharing only stops on explicit Stop, GPS being turned off, or closing the tab.
+- Members appear as colored dots with their initial on each other's maps, plus a name label.
+
+### Privacy notes
+
+- Sharing is OFF by default and requires an explicit tap.
+- Stale members (no update for 5 minutes) drop off the map automatically.
+- Anyone with the group code can read positions of members who are sharing — treat the code like a password.
+- The Firebase config in the HTML is meant to be public; security comes from the Auth + Database rules above.

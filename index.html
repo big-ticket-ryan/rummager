@@ -7,6 +7,14 @@
 <title>Rummager</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script type="module">
+  // Firebase SDK — imported as ES modules. Exposed on window for the inline script below.
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+  import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+  import { getDatabase, ref, set, update, onValue, onDisconnect, serverTimestamp, remove, get } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js";
+  window.__firebase = { initializeApp, getAuth, signInAnonymously, onAuthStateChanged, getDatabase, ref, set, update, onValue, onDisconnect, serverTimestamp, remove, get };
+  window.dispatchEvent(new Event('firebase-ready'));
+</script>
 <style>
   :root {
     --c-unvisited: #c0392b;
@@ -54,23 +62,89 @@
 
   /* ── Panels ── */
   #container { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-  #map-panel { flex: 1 1 50%; min-height: 0; position: relative; transition: flex-basis 0.25s; }
+  #map-panel { flex: 1 1 50%; min-height: 0; position: relative; transition: flex-basis 0.25s; overflow: hidden; }
   #list-panel { flex: 1 1 50%; min-height: 0; overflow-y: auto; background: var(--c-bg); border-top: 2px solid var(--c-border); transition: flex-basis 0.25s; }
-  body.map-only #list-panel { flex-basis: 0; border-top: none; overflow: hidden; }
-  body.list-only #map-panel { flex-basis: 0; }
+  body.map-only #list-panel { flex: 0 0 0; height: 0; border-top: none; overflow: hidden; }
+  body.list-only #map-panel { flex: 0 0 0; height: 0; border: none; }
   body { display: flex; flex-direction: column; }
   #map { width: 100%; height: 100%; }
 
-  /* Panel toggle bar — top-right so it doesn't overlap Leaflet zoom control */
-  #panel-toggles {
-    position: absolute; top: 8px; right: 8px; z-index: 600;
-    display: flex; gap: 4px;
+  /* Panel toolbar — slim bar above the panels so collapse can reach 0 */
+  #panel-toolbar {
+    display: flex; gap: 6px; align-items: center;
+    padding: 4px 8px; background: #f3f3f3;
+    border-bottom: 1px solid var(--c-border);
+    flex-shrink: 0;
   }
-  #panel-toggles button {
-    background: white; border: 1px solid #aaa; border-radius: 6px;
-    padding: 4px 8px; font-size: 0.78rem; box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  #panel-toolbar .toggle-btn {
+    background: white; border: 1px solid #bbb; border-radius: 6px;
+    padding: 4px 10px; font-size: 0.8rem;
   }
-  #panel-toggles button.active { background: var(--c-text); color: white; border-color: var(--c-text); }
+  #panel-toolbar .toggle-btn.active { background: var(--c-text); color: white; border-color: var(--c-text); }
+  #panel-toolbar .spacer { flex: 1; }
+  #panel-toolbar .gps-btn {
+    background: white; border: 1px solid #bbb; border-radius: 6px;
+    padding: 4px 8px; font-size: 0.8rem;
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  #panel-toolbar .gps-btn.on { background: var(--c-me); color: white; border-color: var(--c-me); }
+  #panel-toolbar .gps-btn.off { background: white; color: #888; }
+  #panel-toolbar .gps-btn .gps-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #bbb; display: inline-block;
+  }
+  #panel-toolbar .gps-btn.on .gps-dot { background: #fff; box-shadow: 0 0 0 2px rgba(255,255,255,0.4); animation: pulse-mini 2s infinite; }
+  @keyframes pulse-mini {
+    0%, 100% { opacity: 1; } 50% { opacity: 0.4; }
+  }
+
+  /* Sharing banner */
+  #share-banner {
+    background: var(--c-me); color: white;
+    padding: 6px 10px; font-size: 0.8rem;
+    display: none; align-items: center; gap: 8px;
+    flex-shrink: 0;
+  }
+  #share-banner.on { display: flex; }
+  #share-banner .grow { flex: 1; }
+  #share-banner button {
+    background: rgba(255,255,255,0.25); color: white;
+    padding: 3px 9px; border-radius: 12px; font-size: 0.78rem; font-weight: 600;
+  }
+
+  /* Group member dot on map */
+  .member-dot {
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 50%; color: white; font-weight: 700;
+    border: 3px solid white; box-shadow: 0 0 0 2px rgba(0,0,0,0.3), 0 2px 6px rgba(0,0,0,0.4);
+    font-size: 0.78rem;
+  }
+  .member-label {
+    font-size: 0.65rem; padding: 1px 5px; border-radius: 6px;
+    background: rgba(0,0,0,0.7); color: white; white-space: nowrap;
+    margin-top: 2px; text-align: center;
+  }
+
+  /* Group panel pieces inside sheet */
+  .group-code {
+    font-family: 'Courier New', monospace; font-size: 1.6rem; font-weight: 700;
+    text-align: center; padding: 12px; margin: 6px 0;
+    background: #f4f4f4; border: 2px dashed var(--c-me); border-radius: 8px;
+    letter-spacing: 2px;
+  }
+  .member-row {
+    display: flex; align-items: center; gap: 8px; padding: 8px 4px;
+    border-bottom: 1px solid #eee;
+  }
+  .member-row .swatch {
+    width: 22px; height: 22px; border-radius: 50%; color: white;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 0.8rem; flex-shrink: 0;
+  }
+  .member-row .info { flex: 1; min-width: 0; }
+  .member-row .name { font-weight: 600; font-size: 0.9rem; }
+  .member-row .age  { font-size: 0.72rem; color: var(--c-muted); }
+  .member-row .me-tag { font-size: 0.7rem; background: var(--c-me); color: white; padding: 1px 6px; border-radius: 8px; }
 
   /* FAB */
   #fab {
@@ -203,8 +277,8 @@
     #container { flex-direction: row; }
     #map-panel { flex-basis: 60%; }
     #list-panel { flex-basis: 40%; max-width: 460px; border-top: none; border-left: 2px solid var(--c-border); }
-    body.map-only #list-panel { flex-basis: 0; border-left: none; }
-    body.list-only #map-panel { flex-basis: 0; }
+    body.map-only #list-panel { flex: 0 0 0; width: 0; max-width: 0; border-left: none; }
+    body.list-only #map-panel { flex: 0 0 0; width: 0; }
     #sheet { left: auto; right: 0; bottom: 0; top: 0; max-height: 100vh; max-width: 460px; border-radius: 14px 0 0 0; transform: translateX(100%); }
     #sheet.open { transform: translateX(0); }
   }
@@ -218,8 +292,14 @@
     <div class="row"><span class="pill" id="c-unvisited">— to go</span></div>
     <div class="row"><span class="pill" id="c-visited">— done</span> <span class="pill" id="c-revisit">— ★</span></div>
   </div>
-  <button class="icon-btn" id="btn-locate" title="Find me">📍</button>
+  <button class="icon-btn" id="btn-locate" title="Center on me">📍</button>
+  <button class="icon-btn" id="btn-group" title="Group sharing">👥</button>
   <button class="icon-btn" id="btn-add-manual" title="Add address">＋</button>
+</div>
+
+<div id="share-banner">
+  <span class="grow" id="share-banner-text">Sharing live location…</span>
+  <button id="share-banner-stop">Stop</button>
 </div>
 
 <div id="chipbar">
@@ -231,13 +311,16 @@
   <button id="sort-btn" title="Sort">⇅</button>
 </div>
 
+<div id="panel-toolbar">
+  <button id="tog-map" class="toggle-btn active">Map</button>
+  <button id="tog-list" class="toggle-btn active">List</button>
+  <span class="spacer"></span>
+  <button id="gps-toggle" class="gps-btn off" title="Live GPS tracking"><span class="gps-dot"></span><span id="gps-toggle-label">GPS</span></button>
+</div>
+
 <div id="container">
   <div id="map-panel">
     <div id="map"></div>
-    <div id="panel-toggles">
-      <button id="tog-map" class="active">Map</button>
-      <button id="tog-list" class="active">List</button>
-    </div>
   </div>
   <div id="list-panel">
     <div id="entries"></div>
@@ -937,14 +1020,38 @@ function syncPanelToggleStyles() {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// Geolocation
+// Geolocation — live tracking with explicit on/off toggle
 // ──────────────────────────────────────────────────────────────────────────
-function startWatching() {
-  if (!navigator.geolocation) { toast('Geolocation not supported.'); return; }
-  if (watchId != null) return;
+const GPS_PREF_KEY = 'rummager.gpsEnabled';
+let gpsEnabled = false;
+let hasCenteredOnce = false;
+
+function setGpsToggleUI(on) {
+  const btn = document.getElementById('gps-toggle');
+  const lbl = document.getElementById('gps-toggle-label');
+  if (!btn) return;
+  btn.classList.toggle('on', on);
+  btn.classList.toggle('off', !on);
+  if (lbl) lbl.textContent = on ? 'GPS on' : 'GPS off';
+}
+
+function startWatching(opts = { center: false }) {
+  if (!navigator.geolocation) { toast('Geolocation not supported.'); return false; }
+  gpsEnabled = true;
+  setGpsToggleUI(true);
+  try { localStorage.setItem(GPS_PREF_KEY, '1'); } catch (e) {}
+  if (watchId != null) {
+    if (opts.center && lastKnownPos) map.setView([lastKnownPos.lat, lastKnownPos.lon], 16);
+    return true;
+  }
   watchId = navigator.geolocation.watchPosition(
     (pos) => {
-      lastKnownPos = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+      lastKnownPos = {
+        lat: pos.coords.latitude,
+        lon: pos.coords.longitude,
+        accuracy: pos.coords.accuracy,
+        heading: pos.coords.heading,
+      };
       if (!meMarker) {
         meMarker = L.marker([lastKnownPos.lat, lastKnownPos.lon], {
           icon: L.divIcon({ className: '', html: '<div class="me-dot"></div>', iconSize: [16, 16], iconAnchor: [8, 8] }),
@@ -953,27 +1060,51 @@ function startWatching() {
       } else {
         meMarker.setLatLng([lastKnownPos.lat, lastKnownPos.lon]);
       }
+      if (opts.center && !hasCenteredOnce) {
+        map.setView([lastKnownPos.lat, lastKnownPos.lon], 16);
+        hasCenteredOnce = true;
+      }
+      // Push to group if sharing
+      if (window.Group && Group.isSharing()) Group.publishMyPosition(lastKnownPos);
     },
     (err) => {
-      toast('GPS error: ' + err.message);
-      console.warn(err);
+      console.warn('GPS error:', err);
+      if (err.code === 1) {
+        toast('Location permission denied.');
+        stopWatching();
+      } else {
+        toast('GPS error: ' + err.message);
+      }
     },
     { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
   );
+  return true;
 }
 
-document.getElementById('btn-locate').addEventListener('click', () => {
-  startWatching();
-  if (lastKnownPos) {
-    map.setView([lastKnownPos.lat, lastKnownPos.lon], 16);
-  } else {
-    toast('Locating…');
-    navigator.geolocation.getCurrentPosition(
-      (pos) => { map.setView([pos.coords.latitude, pos.coords.longitude], 16); },
-      (err) => toast('GPS error: ' + err.message),
-      { enableHighAccuracy: true, timeout: 15000 }
-    );
+function stopWatching() {
+  if (watchId != null) {
+    navigator.geolocation.clearWatch(watchId);
+    watchId = null;
   }
+  gpsEnabled = false;
+  setGpsToggleUI(false);
+  try { localStorage.setItem(GPS_PREF_KEY, '0'); } catch (e) {}
+  if (meMarker) { map.removeLayer(meMarker); meMarker = null; }
+  hasCenteredOnce = false;
+  if (window.Group && Group.isSharing()) Group.stopSharing('GPS turned off');
+}
+
+function toggleGps() {
+  if (gpsEnabled) stopWatching();
+  else startWatching({ center: true });
+}
+
+document.getElementById('gps-toggle').addEventListener('click', toggleGps);
+
+document.getElementById('btn-locate').addEventListener('click', () => {
+  if (!gpsEnabled) { startWatching({ center: true }); return; }
+  if (lastKnownPos) map.setView([lastKnownPos.lat, lastKnownPos.lon], 16);
+  else toast('Locating…');
 });
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -1091,6 +1222,382 @@ function toast(msg) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
+// Group sharing (v2.1) — Firebase Realtime Database backend
+// ──────────────────────────────────────────────────────────────────────────
+// PASTE YOUR firebaseConfig HERE. Until you do, group features stay disabled
+// and the rest of the app works exactly as before.
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyCuuSH5ZYO1-IZfer03xYaU6L5l1ruCdX4",
+  authDomain: "rummager-37958.firebaseapp.com",
+  databaseURL: "https://rummager-37958-default-rtdb.firebaseio.com",
+  projectId: "rummager-37958",
+  storageBucket: "rummager-37958.firebasestorage.app",
+  messagingSenderId: "929467076817",
+  appId: "1:929467076817:web:8ed48a8753ada4f43375f0"
+};
+
+const GROUP_PREF_KEY = 'rummager.group';
+const MEMBER_COLORS = ['#2980b9','#27ae60','#e67e22','#8e44ad','#16a085','#d35400','#c0392b','#2c3e50','#f39c12','#1abc9c'];
+
+window.Group = (() => {
+  let app = null, auth = null, db = null, fb = null;
+  let ready = false;
+  let uid = null;
+  let pref = loadPref();
+  let sharing = false;
+  let currentGroup = null;
+  let memberMarkers = {}; // memberId -> { marker, label }
+  let unsubscribeMembers = null;
+  let myDisconnectRef = null;
+
+  function loadPref() {
+    try {
+      const raw = localStorage.getItem(GROUP_PREF_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch (e) {}
+    return { memberId: null, name: '', color: null, currentGroupCode: null };
+  }
+  function savePref() { try { localStorage.setItem(GROUP_PREF_KEY, JSON.stringify(pref)); } catch (e) {} }
+
+  function makeCode() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no I/O/0/1
+    let s = '';
+    for (let i = 0; i < 6; i++) s += chars[Math.floor(Math.random() * chars.length)];
+    return s.slice(0,3) + '-' + s.slice(3);
+  }
+
+  function pickColor() {
+    return MEMBER_COLORS[Math.floor(Math.random() * MEMBER_COLORS.length)];
+  }
+
+  function isConfigured() { return !!FIREBASE_CONFIG; }
+
+  async function initFirebase() {
+    if (ready) return true;
+    if (!isConfigured()) return false;
+    if (!window.__firebase) {
+      await new Promise(r => window.addEventListener('firebase-ready', r, { once: true }));
+    }
+    fb = window.__firebase;
+    app = fb.initializeApp(FIREBASE_CONFIG);
+    auth = fb.getAuth(app);
+    db = fb.getDatabase(app);
+    await fb.signInAnonymously(auth);
+    await new Promise(r => fb.onAuthStateChanged(auth, u => { if (u) { uid = u.uid; r(); } }));
+    if (!pref.memberId) { pref.memberId = uid; savePref(); }
+    ready = true;
+    return true;
+  }
+
+  function memberInitial() {
+    const n = (pref.name || '?').trim();
+    return (n[0] || '?').toUpperCase();
+  }
+
+  function memberIcon(color, initial) {
+    return L.divIcon({
+      className: '',
+      html: `<div class="member-dot" style="width:28px;height:28px;background:${color}">${escapeHtml(initial)}</div>`,
+      iconSize: [28, 28], iconAnchor: [14, 14],
+    });
+  }
+
+  function clearAllMemberMarkers() {
+    Object.values(memberMarkers).forEach(({ marker }) => map.removeLayer(marker));
+    memberMarkers = {};
+  }
+
+  function applyMembersSnapshot(membersObj) {
+    const seen = new Set();
+    const now = Date.now();
+    Object.entries(membersObj || {}).forEach(([mid, m]) => {
+      if (mid === pref.memberId) return; // don't draw my own dot — me-dot already does that
+      if (!m || m.lat == null || m.lon == null) return;
+      if (m.status === 'stopped') return;
+      // Stale: drop if older than 5 min
+      if (m.updatedAt && now - m.updatedAt > 5 * 60 * 1000) return;
+      seen.add(mid);
+      const color = m.color || '#2980b9';
+      const initial = (m.name || '?').trim()[0]?.toUpperCase() || '?';
+      let entry = memberMarkers[mid];
+      if (!entry) {
+        const marker = L.marker([m.lat, m.lon], { icon: memberIcon(color, initial), zIndexOffset: 8000 }).addTo(map);
+        marker.bindTooltip(m.name || 'Member', { permanent: true, direction: 'bottom', className: 'member-label-wrap', offset: [0, 6] });
+        entry = { marker };
+        memberMarkers[mid] = entry;
+      } else {
+        entry.marker.setLatLng([m.lat, m.lon]);
+        entry.marker.setIcon(memberIcon(color, initial));
+        entry.marker.setTooltipContent(m.name || 'Member');
+      }
+    });
+    Object.keys(memberMarkers).forEach(mid => {
+      if (!seen.has(mid)) { map.removeLayer(memberMarkers[mid].marker); delete memberMarkers[mid]; }
+    });
+  }
+
+  async function joinGroup(code) {
+    if (!await initFirebase()) { toast('Group sharing not configured yet.'); return false; }
+    code = code.toUpperCase().trim();
+    if (!/^[A-Z0-9]{3}-?[A-Z0-9]{3}$/.test(code)) { toast('Invalid code format.'); return false; }
+    if (code.length === 6) code = code.slice(0,3) + '-' + code.slice(3);
+
+    // Leave current group's listener, if any
+    if (unsubscribeMembers) { unsubscribeMembers(); unsubscribeMembers = null; }
+    clearAllMemberMarkers();
+
+    currentGroup = code;
+    pref.currentGroupCode = code;
+    if (!pref.color) pref.color = pickColor();
+    savePref();
+
+    // Mark group meta
+    try {
+      await fb.update(fb.ref(db, `groups/${code}/meta`), {
+        createdAt: fb.serverTimestamp(),
+      });
+    } catch (e) { /* may already exist */ }
+
+    // Subscribe to members
+    const membersRef = fb.ref(db, `groups/${code}/members`);
+    unsubscribeMembers = fb.onValue(membersRef, (snap) => {
+      applyMembersSnapshot(snap.val() || {});
+    });
+    return true;
+  }
+
+  function leaveGroup() {
+    if (sharing) stopSharing();
+    if (unsubscribeMembers) { unsubscribeMembers(); unsubscribeMembers = null; }
+    clearAllMemberMarkers();
+    currentGroup = null;
+    pref.currentGroupCode = null;
+    savePref();
+  }
+
+  async function startSharing() {
+    if (!currentGroup) { toast('Join a group first.'); return false; }
+    if (!gpsEnabled) startWatching({ center: false });
+    if (!pref.name) { toast('Set your name first.'); return false; }
+    sharing = true;
+    document.getElementById('share-banner').classList.add('on');
+    document.getElementById('share-banner-text').textContent = `Sharing live location to ${currentGroup} as ${pref.name}`;
+    // Set onDisconnect to mark stopped
+    try {
+      const meRef = fb.ref(db, `groups/${currentGroup}/members/${pref.memberId}`);
+      myDisconnectRef = meRef;
+      await fb.onDisconnect(meRef).update({ status: 'stopped', updatedAt: fb.serverTimestamp() });
+    } catch (e) { console.warn(e); }
+    if (lastKnownPos) publishMyPosition(lastKnownPos);
+    return true;
+  }
+
+  async function stopSharing(reason) {
+    if (!sharing) return;
+    sharing = false;
+    document.getElementById('share-banner').classList.remove('on');
+    if (currentGroup && fb && db) {
+      try {
+        await fb.update(fb.ref(db, `groups/${currentGroup}/members/${pref.memberId}`), {
+          status: 'stopped', updatedAt: fb.serverTimestamp(),
+        });
+        if (myDisconnectRef) { await fb.onDisconnect(myDisconnectRef).cancel(); myDisconnectRef = null; }
+      } catch (e) { console.warn(e); }
+    }
+    if (reason) toast('Stopped sharing: ' + reason);
+  }
+
+  async function publishMyPosition(p) {
+    if (!sharing || !currentGroup || !fb || !db) return;
+    try {
+      await fb.set(fb.ref(db, `groups/${currentGroup}/members/${pref.memberId}`), {
+        name: pref.name || 'Member',
+        color: pref.color || '#2980b9',
+        lat: p.lat, lon: p.lon,
+        accuracy: p.accuracy || null,
+        status: 'sharing',
+        updatedAt: Date.now(),
+      });
+    } catch (e) { console.warn('publish failed', e); }
+  }
+
+  function isSharing() { return sharing; }
+
+  // Restore: if we had a current group code, auto-rejoin (passive listener) on init
+  async function tryRestore() {
+    if (pref.currentGroupCode && isConfigured()) {
+      try {
+        if (await initFirebase()) {
+          await joinGroup(pref.currentGroupCode);
+        }
+      } catch (e) { console.warn('restore group failed', e); }
+    }
+  }
+
+  return {
+    isConfigured, isSharing, joinGroup, leaveGroup, startSharing, stopSharing,
+    publishMyPosition, tryRestore,
+    makeCode, initFirebase,
+    get pref() { return pref; },
+    get currentGroup() { return currentGroup; },
+    setName(n) { pref.name = n; if (!pref.color) pref.color = pickColor(); savePref(); },
+  };
+})();
+
+// ── Group bottom sheet ─────────────────────────────────────────────────────
+function openGroupSheet() {
+  openSheetId = '__group';
+  const g = window.Group;
+  const configured = g.isConfigured();
+  const code = g.currentGroup;
+  const name = g.pref.name || '';
+
+  $sheetBody.innerHTML = `
+    <h2>👥 Group sharing</h2>
+    ${!configured ? `<div style="background:#fff3cd;padding:10px;border-radius:6px;margin:8px 0;font-size:0.85rem;">
+      Group features are not configured yet. Paste your Firebase config into <code>FIREBASE_CONFIG</code> at the top of the group module in <code>index.html</code>, then reload.
+    </div>` : ''}
+
+    <label>Your display name</label>
+    <input type="text" id="g-name" placeholder="e.g. Ryan" value="${escapeHtml(name)}" maxlength="20">
+
+    ${code ? `
+      <label>Current group</label>
+      <div class="group-code">${escapeHtml(code)}</div>
+      <div id="g-members" style="margin-top:6px;"></div>
+      <div class="sheet-actions">
+        ${g.isSharing()
+          ? `<button class="btn-danger" id="g-stop-share">Stop sharing</button>`
+          : `<button class="btn-primary" id="g-start-share">Share my location</button>`}
+        <button class="btn-secondary" id="g-share-link">Invite</button>
+        <button class="btn-secondary" id="g-leave">Leave group</button>
+        <button class="btn-close" id="g-close">Close</button>
+      </div>
+    ` : `
+      <label>Create or join</label>
+      <div class="sheet-actions">
+        <button class="btn-primary" id="g-create" ${!configured ? 'disabled' : ''}>Create new group</button>
+      </div>
+      <label>Or enter a code</label>
+      <input type="text" id="g-code" placeholder="ABC-DEF" maxlength="7" style="text-transform:uppercase;letter-spacing:2px;">
+      <div class="sheet-actions">
+        <button class="btn-primary" id="g-join" ${!configured ? 'disabled' : ''}>Join group</button>
+        <button class="btn-close" id="g-close">Close</button>
+      </div>
+    `}
+  `;
+  $sheetBg.classList.add('open');
+  $sheet.classList.add('open');
+
+  $sheetBody.querySelector('#g-name').addEventListener('blur', (e) => {
+    g.setName(e.target.value.trim());
+  });
+  $sheetBody.querySelector('#g-close').addEventListener('click', closeSheet);
+
+  if (!code) {
+    const createBtn = $sheetBody.querySelector('#g-create');
+    if (createBtn) createBtn.addEventListener('click', async () => {
+      const nm = $sheetBody.querySelector('#g-name').value.trim();
+      if (!nm) { toast('Enter your display name first.'); return; }
+      g.setName(nm);
+      toast('Creating group…');
+      if (!await g.initFirebase()) { toast('Firebase init failed.'); return; }
+      const newCode = g.makeCode();
+      if (await g.joinGroup(newCode)) { openGroupSheet(); }
+    });
+    const joinBtn = $sheetBody.querySelector('#g-join');
+    if (joinBtn) joinBtn.addEventListener('click', async () => {
+      const nm = $sheetBody.querySelector('#g-name').value.trim();
+      const c = $sheetBody.querySelector('#g-code').value.trim().toUpperCase();
+      if (!nm) { toast('Enter your display name first.'); return; }
+      if (!c) { toast('Enter a group code.'); return; }
+      g.setName(nm);
+      toast('Joining…');
+      if (!await g.initFirebase()) { toast('Firebase init failed.'); return; }
+      if (await g.joinGroup(c)) { openGroupSheet(); }
+    });
+  } else {
+    const startBtn = $sheetBody.querySelector('#g-start-share');
+    if (startBtn) startBtn.addEventListener('click', async () => {
+      const nm = $sheetBody.querySelector('#g-name').value.trim();
+      if (!nm) { toast('Enter your display name first.'); return; }
+      g.setName(nm);
+      if (await g.startSharing()) openGroupSheet();
+    });
+    const stopBtn = $sheetBody.querySelector('#g-stop-share');
+    if (stopBtn) stopBtn.addEventListener('click', async () => {
+      await g.stopSharing();
+      openGroupSheet();
+    });
+    const leaveBtn = $sheetBody.querySelector('#g-leave');
+    if (leaveBtn) leaveBtn.addEventListener('click', async () => {
+      if (!confirm('Leave this group?')) return;
+      g.leaveGroup();
+      openGroupSheet();
+    });
+    const linkBtn = $sheetBody.querySelector('#g-share-link');
+    if (linkBtn) linkBtn.addEventListener('click', async () => {
+      const url = `${location.origin}${location.pathname}#group=${encodeURIComponent(code)}`;
+      const text = `Join my Rummager group: ${code}\n${url}`;
+      if (navigator.share) {
+        try { await navigator.share({ title: 'Rummager group', text, url }); } catch (e) {}
+      } else {
+        try { await navigator.clipboard.writeText(text); toast('Invite copied.'); }
+        catch (e) { toast(text); }
+      }
+    });
+
+    // Live members list
+    if (g.isConfigured() && window.__firebase) {
+      const fb = window.__firebase;
+      const membersRef = fb.ref(fb.getDatabase(), `groups/${code}/members`);
+      fb.onValue(membersRef, (snap) => {
+        const list = $sheetBody.querySelector('#g-members');
+        if (!list) return;
+        const v = snap.val() || {};
+        const entries = Object.entries(v);
+        if (entries.length === 0) { list.innerHTML = '<div style="color:var(--c-muted);font-size:0.85rem;padding:8px 0;">No members sharing yet.</div>'; return; }
+        const now = Date.now();
+        list.innerHTML = entries.map(([mid, m]) => {
+          const ageS = m.updatedAt ? Math.round((now - m.updatedAt) / 1000) : null;
+          const ageStr = ageS == null ? '—' : (ageS < 60 ? `${ageS}s ago` : `${Math.round(ageS/60)}m ago`);
+          const me = mid === g.pref.memberId;
+          const initial = (m.name || '?').trim()[0]?.toUpperCase() || '?';
+          return `<div class="member-row">
+            <div class="swatch" style="background:${m.color || '#2980b9'}">${escapeHtml(initial)}</div>
+            <div class="info">
+              <div class="name">${escapeHtml(m.name || 'Member')}${me ? ' <span class="me-tag">me</span>' : ''}</div>
+              <div class="age">${m.status === 'stopped' ? 'stopped' : ageStr}</div>
+            </div>
+          </div>`;
+        }).join('');
+      }, { onlyOnce: true });
+    }
+  }
+}
+
+document.getElementById('btn-group').addEventListener('click', openGroupSheet);
+document.getElementById('share-banner-stop').addEventListener('click', async () => {
+  await window.Group.stopSharing();
+});
+
+// Handle ?group= or #group= deep links → prompt to join
+function handleGroupDeepLink() {
+  const hash = location.hash || '';
+  const m = hash.match(/group=([A-Z0-9-]+)/i);
+  if (m) {
+    const code = m[1].toUpperCase();
+    setTimeout(() => {
+      if (confirm(`Join group ${code}?`)) {
+        // Fill the name later via openGroupSheet flow
+        window.Group.pref.currentGroupCode = code; // tentative
+        openGroupSheet();
+      }
+    }, 600);
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 // Boot
 // ──────────────────────────────────────────────────────────────────────────
 load();
@@ -1098,6 +1605,18 @@ refreshAllMarkers();
 renderList();
 fitToMarkers();
 syncPanelToggleStyles();
+setGpsToggleUI(false);
+
+// Auto-start GPS immediately (per user preference). If perm denied, the error
+// handler will turn it back off. Honor saved preference if present.
+const savedGpsPref = (() => { try { return localStorage.getItem(GPS_PREF_KEY); } catch (e) { return null; } })();
+if (savedGpsPref !== '0') {
+  startWatching({ center: true });
+}
+
+// Restore group state (passive subscribe) and handle deep links
+window.Group.tryRestore();
+handleGroupDeepLink();
 
 // Kick off background geocode for any missing seed coords
 setTimeout(geocodeMissingSeeds, 800);
