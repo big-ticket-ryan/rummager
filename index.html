@@ -608,10 +608,6 @@ function ensureMarker(stop) {
   } else {
     m = L.marker([stop.lat, stop.lon], { icon: makeIcon(stop.status) }).addTo(map);
     m.bindPopup(popupHtml(stop));
-    m.on('popupopen', (e) => {
-      const btn = e.popup._contentNode.querySelector('[data-open-id]');
-      if (btn) btn.addEventListener('click', () => { map.closePopup(); openSheet(stop.id); });
-    });
     markersById[stop.id] = m;
   }
 }
@@ -620,6 +616,17 @@ function removeMarker(id) {
   const m = markersById[id];
   if (m) { map.removeLayer(m); delete markersById[id]; }
 }
+
+// Delegated listener for the "Open details" button inside any popup.
+// Survives setPopupContent() which replaces the button DOM node.
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('.leaflet-popup-content [data-open-id]');
+  if (!btn) return;
+  e.preventDefault();
+  const id = btn.dataset.openId;
+  map.closePopup();
+  openSheet(id);
+});
 
 function refreshAllMarkers() {
   // Add/update markers for stops with coords
