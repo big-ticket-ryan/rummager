@@ -1240,26 +1240,47 @@ function openAddSheet({ lat = null, lon = null, prefilledAddr = '', defaultStatu
     return stop;
   }
 
-  $sheetBody.querySelector('#n-save').addEventListener('click', async () => {
-    const stop = await buildAndCommitStop();
-    if (stop) { closeSheet(); toast('Stop added.'); }
+  const saveBtn = $sheetBody.querySelector('#n-save');
+  const sharePublicBtn = $sheetBody.querySelector('#n-save-public');
+  let submitting = false;
+  function lockButtons() {
+    submitting = true;
+    if (saveBtn) saveBtn.disabled = true;
+    if (sharePublicBtn) sharePublicBtn.disabled = true;
+  }
+  function unlockButtons() {
+    submitting = false;
+    if (saveBtn) saveBtn.disabled = false;
+    if (sharePublicBtn) sharePublicBtn.disabled = false;
+  }
+
+  saveBtn.addEventListener('click', async () => {
+    if (submitting) return;
+    lockButtons();
+    try {
+      const stop = await buildAndCommitStop();
+      if (stop) { closeSheet(); toast('Stop added.'); }
+      else { unlockButtons(); }
+    } catch (e) { unlockButtons(); throw e; }
   });
 
-  const sharePublicBtn = $sheetBody.querySelector('#n-save-public');
   if (sharePublicBtn) {
     sharePublicBtn.addEventListener('click', async () => {
+      if (submitting) return;
       if (!window.PublicStops || !window.PublicStops.isConfigured()) {
         toast('Public sharing not configured.');
         return;
       }
-      const stop = await buildAndCommitStop();
-      if (!stop) return;
-      if (stop.lat == null) { toast('Need coordinates to share publicly.'); closeSheet(); return; }
-      sharePublicBtn.disabled = true;
-      toast('Sharing publicly…');
-      const ok = await window.PublicStops.share(stop);
-      closeSheet();
-      toast(ok ? 'Shared! Visible to all Rummager users.' : 'Public share failed.');
+      lockButtons();
+      try {
+        const stop = await buildAndCommitStop();
+        if (!stop) { unlockButtons(); return; }
+        if (stop.lat == null) { toast('Need coordinates to share publicly.'); closeSheet(); return; }
+        toast('Sharing publicly…');
+        const ok = await window.PublicStops.share(stop);
+        closeSheet();
+        toast(ok ? 'Shared! Visible to all Rummager users.' : 'Public share failed.');
+      } catch (e) { unlockButtons(); throw e; }
     });
   }
 }
