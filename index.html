@@ -1779,6 +1779,9 @@ window.PublicStops = (() => {
     if (!obj || obj.lat == null || obj.lon == null) return false;
     if ((obj.flags || 0) >= FLAG_THRESHOLD) return false;
     if (obj.expiresAt && obj.expiresAt < Date.now()) return false;
+    // Don't show your own public pin — you already have it in your local list as a regular pin.
+    const me = auth && auth.currentUser ? auth.currentUser.uid : null;
+    if (me && obj.createdBy === me) return false;
     return true;
   }
 
