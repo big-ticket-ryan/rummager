@@ -132,11 +132,7 @@ Group sharing is **opt-in** and **off by default**. The app still works fully wi
       "publicStops": {
         ".read": "auth != null",
         "$id": {
-          ".write": "auth != null && (
-            (!data.exists() && newData.child('createdBy').val() === auth.uid) ||
-            (data.exists() && data.child('createdBy').val() === auth.uid) ||
-            root.child('admins').child(auth.uid).exists()
-          )",
+          ".write": "auth != null && ((!data.exists() && newData.child('createdBy').val() === auth.uid) || (data.exists() && data.child('createdBy').val() === auth.uid) || root.child('admins').child(auth.uid).exists())",
           ".validate": "newData.hasChildren(['addr','lat','lon','createdBy','createdAt']) && newData.child('addr').isString() && newData.child('addr').val().length <= 200 && newData.child('lat').isNumber() && newData.child('lat').val() >= 42.5 && newData.child('lat').val() <= 47.5 && newData.child('lon').isNumber() && newData.child('lon').val() >= -93.0 && newData.child('lon').val() <= -86.0",
           "flags": {
             ".write": "auth != null"
