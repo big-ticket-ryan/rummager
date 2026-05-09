@@ -128,6 +128,24 @@ Group sharing is **opt-in** and **off by default**. The app still works fully wi
           },
           "meta": { ".write": "auth != null" }
         }
+      },
+      "publicStops": {
+        ".read": "auth != null",
+        "$id": {
+          ".write": "auth != null && (
+            (!data.exists() && newData.child('createdBy').val() === auth.uid) ||
+            (data.exists() && data.child('createdBy').val() === auth.uid) ||
+            root.child('admins').child(auth.uid).exists()
+          )",
+          ".validate": "newData.hasChildren(['addr','lat','lon','createdBy','createdAt']) && newData.child('addr').isString() && newData.child('addr').val().length <= 200 && newData.child('lat').isNumber() && newData.child('lat').val() >= 42.5 && newData.child('lat').val() <= 47.5 && newData.child('lon').isNumber() && newData.child('lon').val() >= -93.0 && newData.child('lon').val() <= -86.0",
+          "flags": {
+            ".write": "auth != null"
+          }
+        }
+      },
+      "admins": {
+        ".read": "auth != null && root.child('admins').child(auth.uid).exists()",
+        "$uid": { ".write": false }
       }
     }
   }
@@ -176,3 +194,45 @@ Commit and push. Group sharing is now live.
 - Stale members (no update for 5 minutes) drop off the map automatically.
 - Anyone with the group code can read positions of members who are sharing — treat the code like a password.
 - The Firebase config in the HTML is meant to be public; security comes from the Auth + Database rules above.
+
+---
+
+## v2.2 — Public stops + admin moderation
+
+Anyone using Rummager can submit a public stop (a sale that wasn't on the flyer). All users see public stops on their map with a **purple pin + gold ring** and a yellow **NEW** badge until they tap and decide to **Save**, **Flag**, or **Ignore** it.
+
+### Behavior
+
+- **Add → Save & Share Public**: appears as a third button on the Add Stop sheet (between Save and Cancel). Writes the stop to `/publicStops/{id}` with a 7-day TTL.
+- **Tap a public pin**: opens a sheet with the address, who shared it, age, and three actions:
+  - **Save to my list** — copies into the user's localStorage as a regular manual stop.
+  - **Flag** — increments a `flags` counter. When `flags ≥ 3`, the stop is hidden from everyone's map (3-strikes rule).
+  - **Ignore** — local only; just removes the NEW badge for that user.
+- The original poster also sees a **Delete (mine)** button.
+
+### Admin (you)
+
+- **Hidden trigger**: tap the `🛒 Rummager` title in the header **7 times within 5 seconds**. A password prompt appears. Password: the one you set during build (hashed in the source).
+- After unlocking, an Admin sheet exposes **Wipe ALL public stops**.
+
+### One-time admin bootstrap (required for the wipe button to actually work)
+
+Server security rules only allow cross-user deletes if your auth UID is registered as an admin. Do this once:
+
+1. Open the app on your usual phone/browser. Open the Admin sheet (tap title 7×, enter password). It shows **Your auth UID**: copy it.
+2. In the Firebase console → **Realtime Database** → **Data** tab → at the root, hover over the root node → click `+` → key `admins` → value `{}`.
+3. Click `+` on `admins` → key your UID (paste from step 1) → value `true`.
+4. Done. The Wipe button now works from that device.
+
+> **Caution**: anonymous Firebase UIDs are per-device + per-browser. If you clear browser data or switch devices, you'll get a new UID and lose admin powers until you re-add it. To make admin permanent, link your anonymous account to email/password in the Firebase Auth console (advanced).
+
+### Cleanup behavior
+
+- Each public stop carries `expiresAt = createdAt + 7 days`. Clients filter expired stops out client-side. They still occupy DB space until manually wiped.
+- A future enhancement could auto-delete expired entries on app boot for any user (cheap, no Cloud Functions needed). Not implemented in v2.2.
+
+### If it gets out of control
+
+1. Open the app, tap title 7×, enter the password.
+2. Tap **Wipe ALL public stops**. Done.
+3. Optional: temporarily set the rule for `/publicStops/$id` `.write` to `false` in Firebase to disable all new posts while you investigate.

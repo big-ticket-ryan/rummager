@@ -125,6 +125,23 @@
     margin-top: 2px; text-align: center;
   }
 
+  /* Public stop NEW badge on map */
+  .public-marker-wrap { position: relative; }
+  .public-marker-wrap .new-badge {
+    position: absolute; top: -6px; right: -10px;
+    background: #f1c40f; color: #2c3e50; font-weight: 700;
+    font-size: 0.6rem; padding: 1px 5px; border-radius: 8px;
+    border: 1.5px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    letter-spacing: 0.4px;
+  }
+  .public-pin {
+    width: 28px; height: 42px; position: relative;
+    filter: drop-shadow(0 0 0 #f1c40f);
+  }
+  .public-pin svg { width: 100%; height: 100%; display: block; }
+
+  .btn-share { background: #8e44ad; color: white; }
+
   /* Group panel pieces inside sheet */
   .group-code {
     font-family: 'Courier New', monospace; font-size: 1.6rem; font-weight: 700;
@@ -145,6 +162,23 @@
   .member-row .name { font-weight: 600; font-size: 0.9rem; }
   .member-row .age  { font-size: 0.72rem; color: var(--c-muted); }
   .member-row .me-tag { font-size: 0.7rem; background: var(--c-me); color: white; padding: 1px 6px; border-radius: 8px; }
+
+  /* Public stop NEW badge + share button */
+  .public-marker-wrap { position: relative; }
+  .public-marker-wrap .new-badge {
+    position: absolute; top: -6px; right: -10px;
+    background: #f1c40f; color: #2c3e50; font-weight: 700;
+    font-size: 0.6rem; padding: 1px 5px; border-radius: 8px;
+    border: 1.5px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    letter-spacing: 0.4px; z-index: 2;
+  }
+  .btn-share { background: #8e44ad; color: white; }
+  .public-meta {
+    background: #fff8e1; border-left: 3px solid #f1c40f;
+    padding: 8px 10px; margin: 8px 0; border-radius: 4px;
+    font-size: 0.82rem; color: #5d4e2a;
+  }
+  .flag-count { color: #c0392b; font-weight: 600; }
 
   /* Recenter button on map */
   #map-recenter {
@@ -1148,6 +1182,7 @@ function openAddSheet({ lat = null, lon = null, prefilledAddr = '', defaultStatu
     </div>
     <div class="sheet-actions">
       <button class="btn-primary" id="n-save">Save</button>
+      <button class="btn-share" id="n-save-public" title="Save and share with all Rummager users">Save & Share Public</button>
       <button class="btn-close" id="n-close">Cancel</button>
     </div>
     ${lat != null ? `<div style="margin-top:10px; font-size:0.78rem; color:var(--c-muted)">📍 Using GPS coords ${lat.toFixed(5)}, ${lon.toFixed(5)}</div>` : ''}
@@ -1164,12 +1199,12 @@ function openAddSheet({ lat = null, lon = null, prefilledAddr = '', defaultStatu
   });
 
   $sheetBody.querySelector('#n-close').addEventListener('click', closeSheet);
-  $sheetBody.querySelector('#n-save').addEventListener('click', async () => {
+
+  async function buildAndCommitStop() {
     const addr = $sheetBody.querySelector('#n-addr').value.trim();
     const area = $sheetBody.querySelector('#n-area').value.trim();
     const note = $sheetBody.querySelector('#n-note').value;
-    if (!addr && lat == null) { toast('Need an address or GPS coords.'); return; }
-
+    if (!addr && lat == null) { toast('Need an address or GPS coords.'); return null; }
     let coords = (lat != null) ? { lat, lon } : null;
     if (!coords) {
       toast('Geocoding…');
@@ -1189,10 +1224,32 @@ function openAddSheet({ lat = null, lon = null, prefilledAddr = '', defaultStatu
     };
     state.stops.push(stop);
     save(); ensureMarker(stop); renderList();
-    closeSheet();
     if (stop.lat != null) map.setView([stop.lat, stop.lon], 17);
-    toast('Stop added.');
+    return stop;
+  }
+
+  $sheetBody.querySelector('#n-save').addEventListener('click', async () => {
+    const stop = await buildAndCommitStop();
+    if (stop) { closeSheet(); toast('Stop added.'); }
   });
+
+  const sharePublicBtn = $sheetBody.querySelector('#n-save-public');
+  if (sharePublicBtn) {
+    sharePublicBtn.addEventListener('click', async () => {
+      if (!window.PublicStops || !window.PublicStops.isConfigured()) {
+        toast('Public sharing not configured.');
+        return;
+      }
+      const stop = await buildAndCommitStop();
+      if (!stop) return;
+      if (stop.lat == null) { toast('Need coordinates to share publicly.'); closeSheet(); return; }
+      sharePublicBtn.disabled = true;
+      toast('Sharing publicly…');
+      const ok = await window.PublicStops.share(stop);
+      closeSheet();
+      toast(ok ? 'Shared! Visible to all Rummager users.' : 'Public share failed.');
+    });
+  }
 }
 
 document.getElementById('btn-add-manual').addEventListener('click', () => openAddSheet());
@@ -1618,6 +1675,299 @@ function handleGroupDeepLink() {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
+// Public Stops (community-submitted addresses, visible to everyone)
+// ──────────────────────────────────────────────────────────────────────────
+// Reuses the same FIREBASE_CONFIG + anonymous auth as the Group module.
+// Path: /publicStops/{stopId}. Per-stop ownership enforced by security rules.
+const PUBLIC_DISMISSED_KEY = 'rummager.publicDismissed'; // set of public stop IDs the local user has acted on (saved/flagged/ignored)
+const FLAG_THRESHOLD = 3;
+const PUBLIC_BBOX = { minLat: 42.5, maxLat: 47.5, minLon: -93.0, maxLon: -86.0 };
+const ADMIN_PASSWORD_HASH = '8693efe3dabb908510e92e55631d504e4b453f635aac6829ba85250dcad4fb6e';
+
+window.PublicStops = (() => {
+  let fb = null, db = null, auth = null, ready = false;
+  let unsub = null;
+  let cache = {}; // id -> serverObj
+  let markers = {}; // id -> Leaflet marker
+  let dismissed = loadDismissed();
+
+  function loadDismissed() {
+    try { return new Set(JSON.parse(localStorage.getItem(PUBLIC_DISMISSED_KEY) || '[]')); }
+    catch (e) { return new Set(); }
+  }
+  function saveDismissed() {
+    try { localStorage.setItem(PUBLIC_DISMISSED_KEY, JSON.stringify([...dismissed])); } catch (e) {}
+  }
+  function dismiss(id) { dismissed.add(id); saveDismissed(); refreshMarker(id); }
+
+  function isConfigured() { return !!FIREBASE_CONFIG; }
+
+  async function init() {
+    if (ready) return true;
+    if (!isConfigured()) return false;
+    // Piggyback on Group's initialization
+    if (!window.Group || !await window.Group.initFirebase()) return false;
+    fb = window.__firebase;
+    auth = fb.getAuth();
+    db = fb.getDatabase();
+    ready = true;
+    subscribe();
+    return true;
+  }
+
+  function subscribe() {
+    if (unsub) return;
+    const r = fb.ref(db, 'publicStops');
+    unsub = fb.onValue(r, (snap) => {
+      const next = snap.val() || {};
+      // Diff: remove markers for deleted ids
+      Object.keys(cache).forEach(id => { if (!next[id]) removeMarker(id); });
+      cache = next;
+      Object.entries(cache).forEach(([id, obj]) => upsertMarker(id, obj));
+    });
+  }
+
+  function publicIcon(isNew) {
+    return L.divIcon({
+      className: 'public-marker-wrap',
+      html: `<div style="position:relative;width:28px;height:42px;">
+        <svg width="28" height="42" viewBox="0 0 28 42" xmlns="http://www.w3.org/2000/svg">
+          <path d="M14 0C6.3 0 0 6.3 0 14c0 10.5 14 28 14 28s14-17.5 14-28C28 6.3 21.7 0 14 0z" fill="#8e44ad" stroke="#f1c40f" stroke-width="2"/>
+          <circle cx="14" cy="14" r="6" fill="#fff"/>
+          <text x="14" y="17.5" text-anchor="middle" font-size="10" font-weight="bold" fill="#8e44ad">+</text>
+        </svg>
+        ${isNew ? '<span class="new-badge">NEW</span>' : ''}
+      </div>`,
+      iconSize: [28, 42], iconAnchor: [14, 42], popupAnchor: [0, -38],
+    });
+  }
+
+  function shouldShow(obj) {
+    if (!obj || obj.lat == null || obj.lon == null) return false;
+    if ((obj.flags || 0) >= FLAG_THRESHOLD) return false;
+    if (obj.expiresAt && obj.expiresAt < Date.now()) return false;
+    return true;
+  }
+
+  function upsertMarker(id, obj) {
+    if (!shouldShow(obj)) { removeMarker(id); return; }
+    const isNew = !dismissed.has(id);
+    let m = markers[id];
+    if (!m) {
+      m = L.marker([obj.lat, obj.lon], { icon: publicIcon(isNew), zIndexOffset: 7000 }).addTo(map);
+      m.on('click', () => openPublicStopSheet(id));
+      markers[id] = m;
+    } else {
+      m.setLatLng([obj.lat, obj.lon]);
+      m.setIcon(publicIcon(isNew));
+    }
+  }
+
+  function removeMarker(id) {
+    if (markers[id]) { map.removeLayer(markers[id]); delete markers[id]; }
+  }
+
+  function refreshMarker(id) {
+    if (cache[id]) upsertMarker(id, cache[id]);
+  }
+
+  async function share(stop) {
+    if (!await init()) return false;
+    if (stop.lat < PUBLIC_BBOX.minLat || stop.lat > PUBLIC_BBOX.maxLat ||
+        stop.lon < PUBLIC_BBOX.minLon || stop.lon > PUBLIC_BBOX.maxLon) {
+      toast('Coordinates outside allowed area; not shared.');
+      return false;
+    }
+    const me = auth.currentUser;
+    if (!me) return false;
+    const id = 'pub-' + Math.random().toString(36).slice(2, 12);
+    const now = Date.now();
+    const payload = {
+      addr: (stop.addr || '').slice(0, 200),
+      area: (stop.area || '').slice(0, 80),
+      note: (stop.note || '').slice(0, 500),
+      lat: stop.lat, lon: stop.lon,
+      status: stop.status || 'unvisited',
+      createdBy: me.uid,
+      createdByName: (window.Group && window.Group.pref.name) || 'Anonymous',
+      createdAt: now,
+      updatedAt: now,
+      expiresAt: now + 7 * 24 * 60 * 60 * 1000, // 7 days
+      flags: 0,
+    };
+    try {
+      await fb.set(fb.ref(db, `publicStops/${id}`), payload);
+      dismiss(id); // we know about it; don't show NEW to ourselves
+      return true;
+    } catch (e) { console.error('public share failed', e); return false; }
+  }
+
+  async function flag(id) {
+    if (!await init()) return false;
+    const obj = cache[id]; if (!obj) return false;
+    const newCount = (obj.flags || 0) + 1;
+    try {
+      await fb.update(fb.ref(db, `publicStops/${id}`), { flags: newCount });
+      dismiss(id);
+      return true;
+    } catch (e) { console.error('flag failed', e); return false; }
+  }
+
+  async function deleteOne(id) {
+    if (!await init()) return false;
+    try { await fb.remove(fb.ref(db, `publicStops/${id}`)); return true; }
+    catch (e) { console.error('delete failed', e); return false; }
+  }
+
+  async function wipeAll() {
+    if (!await init()) return false;
+    try { await fb.remove(fb.ref(db, 'publicStops')); return true; }
+    catch (e) { console.error('wipe failed', e); return false; }
+  }
+
+  function get(id) { return cache[id]; }
+  function isDismissed(id) { return dismissed.has(id); }
+  function myUid() { return auth && auth.currentUser ? auth.currentUser.uid : null; }
+
+  return { init, isConfigured, share, flag, deleteOne, wipeAll, get, dismiss, isDismissed, myUid };
+})();
+
+// ── Public stop bottom sheet ──────────────────────────────────────────────
+function openPublicStopSheet(id) {
+  const obj = window.PublicStops.get(id);
+  if (!obj) return;
+  openSheetId = '__public:' + id;
+  const myUid = window.PublicStops.myUid();
+  const isMine = myUid && obj.createdBy === myUid;
+  const ageStr = (() => {
+    const s = Math.round((Date.now() - obj.createdAt) / 1000);
+    if (s < 60) return `${s}s ago`;
+    if (s < 3600) return `${Math.round(s/60)}m ago`;
+    if (s < 86400) return `${Math.round(s/3600)}h ago`;
+    return `${Math.round(s/86400)}d ago`;
+  })();
+  $sheetBody.innerHTML = `
+    <h2>📍 ${escapeHtml(obj.addr)}</h2>
+    <div class="public-meta">
+      Shared by <b>${escapeHtml(obj.createdByName || 'Anonymous')}</b> · ${ageStr}
+      ${obj.flags ? ` · <span class="flag-count">🚩 ${obj.flags}</span>` : ''}
+    </div>
+    ${obj.area ? `<label>Area</label><div>${escapeHtml(obj.area)}</div>` : ''}
+    ${obj.note ? `<label>Note</label><div style="white-space:pre-wrap;">${escapeHtml(obj.note)}</div>` : ''}
+    <div class="sheet-actions">
+      <button class="btn-primary" id="ps-save">💾 Save to my list</button>
+      <button class="btn-danger" id="ps-flag">🚩 Flag</button>
+      <button class="btn-secondary" id="ps-ignore">Ignore</button>
+      ${isMine ? `<button class="btn-danger" id="ps-delete">Delete (mine)</button>` : ''}
+      <button class="btn-close" id="ps-close">Close</button>
+    </div>
+  `;
+  $sheetBg.classList.add('open');
+  $sheet.classList.add('open');
+
+  // Pan map
+  if (obj.lat != null) map.setView([obj.lat, obj.lon], Math.max(map.getZoom(), 16));
+
+  $sheetBody.querySelector('#ps-close').addEventListener('click', closeSheet);
+  $sheetBody.querySelector('#ps-ignore').addEventListener('click', () => {
+    window.PublicStops.dismiss(id);
+    closeSheet();
+    toast('Hidden the NEW badge.');
+  });
+  $sheetBody.querySelector('#ps-save').addEventListener('click', () => {
+    const now = Date.now();
+    const stop = {
+      id: uid(),
+      addr: obj.addr, area: obj.area || '', items: '',
+      lat: obj.lat, lon: obj.lon,
+      source: 'manual',
+      status: 'unvisited',
+      note: (obj.note ? `(from public, by ${obj.createdByName}): ${obj.note}` : `(from public, by ${obj.createdByName})`),
+      photos: [],
+      createdAt: now, updatedAt: now,
+    };
+    state.stops.push(stop);
+    save(); ensureMarker(stop); renderList();
+    window.PublicStops.dismiss(id);
+    closeSheet();
+    toast('Saved to your list.');
+  });
+  $sheetBody.querySelector('#ps-flag').addEventListener('click', async () => {
+    if (!confirm('Flag this stop as inappropriate or spam?')) return;
+    const ok = await window.PublicStops.flag(id);
+    closeSheet();
+    toast(ok ? 'Flagged. Thanks.' : 'Flag failed.');
+  });
+  const delBtn = $sheetBody.querySelector('#ps-delete');
+  if (delBtn) {
+    delBtn.addEventListener('click', async () => {
+      if (!confirm('Delete this public stop? (only you can do this — you posted it)')) return;
+      const ok = await window.PublicStops.deleteOne(id);
+      closeSheet();
+      toast(ok ? 'Deleted.' : 'Delete failed.');
+    });
+  }
+}
+
+// ── Admin: tap header title 7 times within 5s → password → wipe ───────────
+async function sha256Hex(str) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+(function setupAdminGesture() {
+  const title = document.querySelector('#header h1');
+  if (!title) return;
+  let taps = 0, firstTapAt = 0;
+  title.addEventListener('click', async () => {
+    const now = Date.now();
+    if (now - firstTapAt > 5000) { taps = 0; firstTapAt = now; }
+    taps++;
+    if (taps === 7) {
+      taps = 0;
+      const pw = prompt('Admin password:');
+      if (!pw) return;
+      const h = await sha256Hex(pw);
+      if (h !== ADMIN_PASSWORD_HASH) { toast('Wrong password.'); return; }
+      openAdminSheet();
+    }
+  });
+})();
+
+function openAdminSheet() {
+  openSheetId = '__admin';
+  const uidStr = window.PublicStops.myUid() || '(not signed in)';
+  $sheetBody.innerHTML = `
+    <h2>🛠️ Admin</h2>
+    <div class="public-meta">
+      Your auth UID: <code style="font-size:0.78rem;word-break:break-all;">${escapeHtml(uidStr)}</code><br>
+      Add this UID under <code>/admins/&lt;uid&gt; = true</code> in Firebase to enable cross-user moderation in security rules.
+    </div>
+    <label>Public stops (current count: ${Object.keys(window.PublicStops_cacheView()).length})</label>
+    <div class="sheet-actions">
+      <button class="btn-danger" id="adm-wipe">💣 Wipe ALL public stops</button>
+      <button class="btn-close" id="adm-close">Close</button>
+    </div>
+  `;
+  $sheetBg.classList.add('open');
+  $sheet.classList.add('open');
+  $sheetBody.querySelector('#adm-close').addEventListener('click', closeSheet);
+  $sheetBody.querySelector('#adm-wipe').addEventListener('click', async () => {
+    if (!confirm('WIPE ALL public stops for everyone? This cannot be undone.')) return;
+    const ok = await window.PublicStops.wipeAll();
+    closeSheet();
+    toast(ok ? 'All public stops wiped.' : 'Wipe failed (check that your UID is in /admins).');
+  });
+}
+// Helper to read cache from inside admin sheet without exposing internals
+window.PublicStops_cacheView = () => {
+  // Lazy: re-derive from markers (good enough for a count)
+  const out = {};
+  document.querySelectorAll('.public-marker-wrap').forEach((_, i) => out[i] = 1);
+  return out;
+};
+
+// ──────────────────────────────────────────────────────────────────────────
 // Boot
 // ──────────────────────────────────────────────────────────────────────────
 load();
@@ -1637,6 +1987,9 @@ if (savedGpsPref !== '0') {
 // Restore group state (passive subscribe) and handle deep links
 window.Group.tryRestore();
 handleGroupDeepLink();
+
+// Initialize public stops feed (anonymous auth via Group module)
+window.PublicStops.init().catch(e => console.warn('PublicStops init failed', e));
 
 // Kick off background geocode for any missing seed coords
 setTimeout(geocodeMissingSeeds, 800);
