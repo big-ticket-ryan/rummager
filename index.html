@@ -20,6 +20,7 @@
     --c-unvisited: #c0392b;
     --c-visited:   #27ae60;
     --c-revisit:   #e67e22;
+    --c-must:      #d81b60;
     --c-me:        #2980b9;
     --c-bg:        #fafafa;
     --c-border:    #ddd;
@@ -81,6 +82,7 @@
     padding: 4px 10px; font-size: 0.8rem;
   }
   #panel-toolbar .toggle-btn.active { background: var(--c-text); color: white; border-color: var(--c-text); }
+  #panel-toolbar #route-btn.routed { background: var(--c-must); color: white; border-color: var(--c-must); }
   #panel-toolbar .spacer { flex: 1; }
   #panel-toolbar .gps-btn {
     background: white; border: 1px solid #bbb; border-radius: 6px;
@@ -212,6 +214,7 @@
   .sw.unvisited { background: var(--c-unvisited); }
   .sw.visited   { background: var(--c-visited); }
   .sw.revisit   { background: var(--c-revisit); }
+  .sw.must      { background: var(--c-must); }
   .entry .body { flex: 1; min-width: 0; }
   .entry .addr { font-weight: 600; font-size: 0.92rem; color: var(--c-text); }
   .entry .area { font-size: 0.72rem; color: var(--c-muted); }
@@ -257,6 +260,7 @@
   .status-row button.unvisited.active { background: var(--c-unvisited); color: white; }
   .status-row button.visited.active   { background: var(--c-visited); color: white; }
   .status-row button.revisit.active   { background: var(--c-revisit); color: white; }
+  .status-row button.must.active      { background: var(--c-must); color: white; }
   .photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 6px; margin-top: 6px; }
   .photo-grid .ph {
     position: relative; aspect-ratio: 1; border-radius: 6px;
@@ -335,7 +339,7 @@
   <h1><span class="em">🛒</span>Rummager</h1>
   <div class="counts" id="counts">
     <div class="row"><span class="pill" id="c-unvisited">— to go</span></div>
-    <div class="row"><span class="pill" id="c-visited">— done</span> <span class="pill" id="c-revisit">— ★</span></div>
+    <div class="row"><span class="pill" id="c-visited">— done</span> <span class="pill" id="c-revisit">— ★</span> <span class="pill" id="c-must">— ❗</span></div>
   </div>
   <button class="icon-btn" id="btn-locate" title="Center on me">📍</button>
   <button class="icon-btn" id="btn-group" title="Group sharing">👥</button>
@@ -352,6 +356,7 @@
   <button class="chip" data-filter="unvisited"><span class="dot" style="background:var(--c-unvisited)"></span>To go</button>
   <button class="chip" data-filter="visited"><span class="dot" style="background:var(--c-visited)"></span>Done</button>
   <button class="chip" data-filter="revisit"><span class="dot" style="background:var(--c-revisit)"></span>★</button>
+  <button class="chip" data-filter="must"><span class="dot" style="background:var(--c-must)"></span>❗ Must</button>
   <input type="text" id="search" placeholder="Search…" />
   <button id="sort-btn" title="Sort">⇅</button>
 </div>
@@ -359,6 +364,7 @@
 <div id="panel-toolbar">
   <button id="tog-map" class="toggle-btn active">Map</button>
   <button id="tog-list" class="toggle-btn active">List</button>
+  <button id="route-btn" class="toggle-btn" title="Route to all Must Visit stops">🗺️ Route</button>
   <span class="spacer"></span>
   <button id="gps-toggle" class="gps-btn off" title="Live GPS tracking"><span class="gps-dot"></span><span id="gps-toggle-label">GPS</span></button>
 </div>
@@ -566,12 +572,13 @@ let lastKnownPos = null; // { lat, lon }
 function makeIcon(status) {
   const color = status === 'visited' ? 'var(--c-visited)'
               : status === 'revisit' ? 'var(--c-revisit)'
+              : status === 'must'    ? 'var(--c-must)'
               : 'var(--c-unvisited)';
   // resolve CSS var to actual color
   const cssColor = getComputedStyle(document.documentElement).getPropertyValue(
-    status === 'visited' ? '--c-visited' : status === 'revisit' ? '--c-revisit' : '--c-unvisited'
+    status === 'visited' ? '--c-visited' : status === 'revisit' ? '--c-revisit' : status === 'must' ? '--c-must' : '--c-unvisited'
   ).trim() || '#c0392b';
-  const glyph = status === 'visited' ? '✓' : status === 'revisit' ? '★' : '';
+  const glyph = status === 'visited' ? '✓' : status === 'revisit' ? '★' : status === 'must' ? '!' : '';
   return L.divIcon({
     className: 'rm-marker',
     html: `<svg width="28" height="42" viewBox="0 0 28 42" xmlns="http://www.w3.org/2000/svg">
@@ -714,6 +721,7 @@ const $counts = {
   unvisited: document.getElementById('c-unvisited'),
   visited:   document.getElementById('c-visited'),
   revisit:   document.getElementById('c-revisit'),
+  must:      document.getElementById('c-must'),
 };
 let activeFilter = 'all';
 let sortMode = 'default'; // 'default' | 'status' | 'distance'
@@ -741,7 +749,7 @@ function getFilteredStops() {
     return true;
   });
   if (sortMode === 'status') {
-    const order = { revisit: 0, unvisited: 1, visited: 2 };
+    const order = { must: 0, revisit: 1, unvisited: 2, visited: 3 };
     arr.sort((a, b) => (order[a.status] - order[b.status]) || a.addr.localeCompare(b.addr));
   } else if (sortMode === 'distance' && lastKnownPos) {
     arr.sort((a, b) => {
@@ -754,15 +762,17 @@ function getFilteredStops() {
 }
 
 function renderCounts() {
-  let u = 0, v = 0, r = 0;
+  let u = 0, v = 0, r = 0, m = 0;
   state.stops.forEach(s => {
     if (s.status === 'visited') v++;
     else if (s.status === 'revisit') r++;
+    else if (s.status === 'must') m++;
     else u++;
   });
   $counts.unvisited.textContent = `${u} to go`;
   $counts.visited.textContent = `${v} done`;
   $counts.revisit.textContent = `${r} ★`;
+  $counts.must.textContent = `${m} ❗`;
 }
 
 function renderList() {
@@ -848,6 +858,7 @@ function renderSheet(s) {
       <button class="unvisited ${s.status==='unvisited'?'active':''}" data-status="unvisited">Unvisited</button>
       <button class="visited ${s.status==='visited'?'active':''}" data-status="visited">Visited ✓</button>
       <button class="revisit ${s.status==='revisit'?'active':''}" data-status="revisit">Revisit ★</button>
+      <button class="must ${s.status==='must'?'active':''}" data-status="must">Must ❗</button>
     </div>
 
     <label>Address</label>
@@ -1179,6 +1190,7 @@ function openAddSheet({ lat = null, lon = null, prefilledAddr = '', defaultStatu
       <button class="unvisited ${defaultStatus==='unvisited'?'active':''}" data-status="unvisited">Unvisited</button>
       <button class="visited ${defaultStatus==='visited'?'active':''}" data-status="visited">Visited ✓</button>
       <button class="revisit ${defaultStatus==='revisit'?'active':''}" data-status="revisit">Revisit ★</button>
+      <button class="must ${defaultStatus==='must'?'active':''}" data-status="must">Must ❗</button>
     </div>
     <div class="sheet-actions">
       <button class="btn-primary" id="n-save">Save</button>
@@ -1966,6 +1978,141 @@ window.PublicStops_cacheView = () => {
   document.querySelectorAll('.public-marker-wrap').forEach((_, i) => out[i] = 1);
   return out;
 };
+
+// ──────────────────────────────────────────────────────────────────────────
+// Route through all Must Visit stops (greedy nearest-neighbor + 2-opt)
+// ──────────────────────────────────────────────────────────────────────────
+const BELGIUM_DEFAULT = { lat: 43.4997, lon: -87.8504 };
+let routeLayer = null;
+let routeNumberMarkers = [];
+
+function clearRoute() {
+  if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
+  routeNumberMarkers.forEach(m => map.removeLayer(m));
+  routeNumberMarkers = [];
+  document.getElementById('route-btn').classList.remove('routed');
+}
+
+function nearestNeighborOrder(start, points) {
+  const remaining = points.slice();
+  const order = [];
+  let cur = start;
+  while (remaining.length) {
+    let bestIdx = 0, bestD = Infinity;
+    for (let i = 0; i < remaining.length; i++) {
+      const d = haversineMiles(cur.lat, cur.lon, remaining[i].lat, remaining[i].lon);
+      if (d < bestD) { bestD = d; bestIdx = i; }
+    }
+    cur = remaining[bestIdx];
+    order.push(cur);
+    remaining.splice(bestIdx, 1);
+  }
+  return order;
+}
+
+function totalDistance(start, ordered) {
+  let d = 0, prev = start;
+  for (const p of ordered) { d += haversineMiles(prev.lat, prev.lon, p.lat, p.lon); prev = p; }
+  return d;
+}
+
+function twoOpt(start, ordered) {
+  if (ordered.length < 4) return ordered;
+  let best = ordered.slice();
+  let bestD = totalDistance(start, best);
+  let improved = true;
+  let iter = 0;
+  while (improved && iter < 50) {
+    improved = false; iter++;
+    for (let i = 0; i < best.length - 1; i++) {
+      for (let k = i + 1; k < best.length; k++) {
+        const candidate = best.slice(0, i)
+          .concat(best.slice(i, k + 1).reverse())
+          .concat(best.slice(k + 1));
+        const d = totalDistance(start, candidate);
+        if (d + 1e-9 < bestD) { best = candidate; bestD = d; improved = true; }
+      }
+    }
+  }
+  return best;
+}
+
+function buildAndShowRoute() {
+  clearRoute();
+  const must = state.stops.filter(s => s.status === 'must' && s.lat != null && s.lon != null);
+  if (must.length === 0) {
+    toast('No Must Visit stops yet. Mark some with the ❗ status.');
+    return;
+  }
+  const start = lastKnownPos
+    ? { lat: lastKnownPos.lat, lon: lastKnownPos.lon, label: 'Me' }
+    : { lat: BELGIUM_DEFAULT.lat, lon: BELGIUM_DEFAULT.lon, label: 'Belgium WI' };
+
+  let ordered = nearestNeighborOrder(start, must);
+  ordered = twoOpt(start, ordered);
+
+  const latlngs = [[start.lat, start.lon], ...ordered.map(s => [s.lat, s.lon])];
+  routeLayer = L.polyline(latlngs, { color: '#d81b60', weight: 4, opacity: 0.85, dashArray: '8 6' }).addTo(map);
+
+  // Number badges on each stop
+  ordered.forEach((s, i) => {
+    const num = i + 1;
+    const icon = L.divIcon({
+      className: '',
+      html: `<div style="background:#d81b60;color:white;border:2px solid #fff;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:0.78rem;box-shadow:0 1px 3px rgba(0,0,0,0.4);">${num}</div>`,
+      iconSize: [24, 24], iconAnchor: [12, 12],
+    });
+    const m = L.marker([s.lat, s.lon], { icon, zIndexOffset: 9000, interactive: false }).addTo(map);
+    routeNumberMarkers.push(m);
+  });
+
+  map.fitBounds(routeLayer.getBounds().pad(0.15));
+
+  const totalMi = totalDistance(start, ordered).toFixed(1);
+  const etaMin = Math.round((totalMi / 25) * 60); // rough @ 25 mph
+  document.getElementById('route-btn').classList.add('routed');
+  showRouteSummary(start, ordered, totalMi, etaMin);
+}
+
+function showRouteSummary(start, ordered, totalMi, etaMin) {
+  openSheetId = '__route';
+  const truncated = ordered.length > 9; // Google Maps caps origin+8 waypoints+destination = 10
+  const usable = ordered.slice(0, 9);
+  const last = usable[usable.length - 1];
+  const middle = usable.slice(0, -1);
+  const waypoints = middle.map(s => `${s.lat},${s.lon}`).join('|');
+  const gmapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${start.lat},${start.lon}&destination=${last.lat},${last.lon}` +
+    (waypoints ? `&waypoints=${encodeURIComponent(waypoints)}` : '') + `&travelmode=driving`;
+
+  $sheetBody.innerHTML = `
+    <h2>🗺️ Route — ${ordered.length} Must Visit stop${ordered.length === 1 ? '' : 's'}</h2>
+    <div class="public-meta">
+      Start: <b>${escapeHtml(start.label)}</b> · Total ~${totalMi} mi · ~${etaMin} min @ 25 mph<br>
+      <small>Straight-line estimate. Use Google Maps for actual driving directions.</small>
+      ${truncated ? `<br><b style="color:#c0392b">Note:</b> Google Maps caps at 10 stops; opening will show first 9. Full route is on the Rummager map.` : ''}
+    </div>
+    <ol style="padding-left: 20px; margin: 8px 0;">
+      ${ordered.map(s => `<li style="margin: 4px 0;">${escapeHtml(s.addr)}${s.area && s.area !== 'Belgium' ? ` <span style="color:var(--c-muted);font-size:0.78rem;">(${escapeHtml(s.area)})</span>` : ''}</li>`).join('')}
+    </ol>
+    <div class="sheet-actions">
+      <button class="btn-primary" id="r-gmaps">🧭 Open in Google Maps</button>
+      <button class="btn-danger" id="r-clear">Clear route</button>
+      <button class="btn-close" id="r-close">Close</button>
+    </div>
+  `;
+  $sheetBg.classList.add('open');
+  $sheet.classList.add('open');
+  $sheetBody.querySelector('#r-close').addEventListener('click', closeSheet);
+  $sheetBody.querySelector('#r-gmaps').addEventListener('click', () => {
+    window.open(gmapsUrl, '_blank');
+  });
+  $sheetBody.querySelector('#r-clear').addEventListener('click', () => { clearRoute(); closeSheet(); });
+}
+
+document.getElementById('route-btn').addEventListener('click', () => {
+  if (routeLayer) { clearRoute(); toast('Route cleared.'); return; }
+  buildAndShowRoute();
+});
 
 // ──────────────────────────────────────────────────────────────────────────
 // Boot
