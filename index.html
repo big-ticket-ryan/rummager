@@ -718,7 +718,12 @@ const MANUAL_COORDS = {}; // Fredonia: no manual seed coords
 // ──────────────────────────────────────────────────────────────────────────
 const STORAGE_KEY = 'rummager.fredonia.v1';
 const SCHEMA_VERSION = 2;
-let state = { version: SCHEMA_VERSION, stops: [], welcomeSeen: false, mySaleId: null, newAcks: {} };
+let state = { version: SCHEMA_VERSION, stops: [], welcomeSeen: false, mySaleIds: [], newAcks: {} };
+
+// Returns true if this device owns the given publicId.
+function isMyPublicId(pid) {
+  return !!pid && Array.isArray(state.mySaleIds) && state.mySaleIds.includes(pid);
+}
 
 function uid() {
   return 'r-' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
@@ -731,12 +736,18 @@ function load() {
       const parsed = JSON.parse(raw);
       if (parsed && parsed.version === SCHEMA_VERSION && Array.isArray(parsed.stops)) {
         state = Object.assign(
-          { version: SCHEMA_VERSION, stops: [], welcomeSeen: false, mySaleId: null, newAcks: {} },
+          { version: SCHEMA_VERSION, stops: [], welcomeSeen: false, mySaleIds: [], newAcks: {} },
           parsed
         );
         // Defensive: ensure containers exist
         state.stops = state.stops || [];
         state.newAcks = state.newAcks || {};
+        // Migrate legacy single mySaleId (string) -> mySaleIds (array)
+        if (!Array.isArray(state.mySaleIds)) state.mySaleIds = [];
+        if (typeof parsed.mySaleId === 'string' && parsed.mySaleId) {
+          if (!state.mySaleIds.includes(parsed.mySaleId)) state.mySaleIds.push(parsed.mySaleId);
+        }
+        delete state.mySaleId;
         return;
       }
     }
@@ -744,7 +755,7 @@ function load() {
     console.warn('Storage load failed, starting fresh:', e);
   }
   // First run — Fredonia starts empty.
-  state = { version: SCHEMA_VERSION, stops: [], welcomeSeen: false, mySaleId: null, newAcks: {} };
+  state = { version: SCHEMA_VERSION, stops: [], welcomeSeen: false, mySaleIds: [], newAcks: {} };
   save();
 }
 
@@ -801,7 +812,7 @@ function makeIcon(stop) {
   let badgesHtml = '';
   if (isStop) {
     const badges = [];
-    if (state.mySaleId && stop.publicId === state.mySaleId) {
+    if (isMyPublicId(stop.publicId)) {
       badges.push(`<span class="mb mine" title="Your published sale">MINE</span>`);
     }
     if (window.PublicStops && window.PublicStops.isNew && window.PublicStops.isNew(stop)) {
@@ -1057,7 +1068,7 @@ function renderList() {
       ? haversineMiles(lastKnownPos.lat, lastKnownPos.lon, s.lat, s.lon).toFixed(1) + ' mi'
       : null;
     const isNew = window.PublicStops && window.PublicStops.isNew && window.PublicStops.isNew(s);
-    const isMine = state.mySaleId && s.publicId === state.mySaleId;
+    const isMine = isMyPublicId(s.publicId);
     const ps = s.priceSlash;
     const hasGenSlash = ps && ps.generic && ps.generic.active;
     const hasItemSlash = ps && ps.items && ps.items.active && Array.isArray(ps.items.list) && ps.items.list.length > 0;
@@ -1143,7 +1154,7 @@ document.getElementById('sheet-close').addEventListener('click', closeSheet);
 
 function renderSheet(s) {
   const isPublic = s.source === 'public';
-  const isMine = isPublic && state.mySaleId && s.publicId === state.mySaleId;
+  const isMine = isPublic && isMyPublicId(s.publicId);
   const editable = !isPublic || isMine; // private stops always editable; public only if mine
   const ps = s.priceSlash || {};
   const hasGen = ps.generic && ps.generic.active;
@@ -1224,7 +1235,7 @@ function renderSheet(s) {
 
 function wireSheet(s) {
   const isPublic = s.source === 'public';
-  const isMine = isPublic && state.mySaleId && s.publicId === state.mySaleId;
+  const isMine = isPublic && isMyPublicId(s.publicId);
 
   // Status buttons (always editable — status is local)
   $sheetBody.querySelectorAll('.status-row button').forEach(btn => {
@@ -2198,7 +2209,7 @@ window.PublicStops = (() => {
       removeMarker(s.id);
       state.stops = state.stops.filter(x => x.id !== s.id);
       delete state.newAcks[s.publicId];
-      if (state.mySaleId === s.publicId) state.mySaleId = null;
+      state.mySaleIds = (state.mySaleIds || []).filter(id => id !== s.publicId);
     });
     save();
     renderList();
@@ -2206,7 +2217,7 @@ window.PublicStops = (() => {
 
   function isNew(stop) {
     if (!stop.publicId) return false;
-    if (state.mySaleId === stop.publicId) return false;
+    if (isMyPublicId(stop.publicId)) return false;
     const ackAt = state.newAcks[stop.publicId];
     if (!ackAt) return true;
     return (Date.now() - ackAt) < NEW_BADGE_MS;
@@ -2250,7 +2261,8 @@ window.PublicStops = (() => {
     });
     try {
       await fb.set(fb.ref(db, `publicStops/${id}`), fullPayload);
-      state.mySaleId = id;
+      if (!Array.isArray(state.mySaleIds)) state.mySaleIds = [];
+      if (!state.mySaleIds.includes(id)) state.mySaleIds.push(id);
       state.newAcks[id] = Date.now() - NEW_BADGE_MS - 1; // pre-ack ourselves
       save();
       if (window.Stats) window.Stats.bumpEvent('publishes');
@@ -2289,7 +2301,8 @@ window.PublicStops = (() => {
     if (!await init()) return false;
     try {
       await fb.remove(fb.ref(db, `publicStops/${publicId}`));
-      if (state.mySaleId === publicId) { state.mySaleId = null; save(); }
+      state.mySaleIds = (state.mySaleIds || []).filter(id => id !== publicId);
+      save();
       return true;
     } catch (e) { console.error('delete failed', e); return false; }
   }
@@ -2973,7 +2986,7 @@ function openPublishSaleSheet({ editPublicId = null } = {}) {
     }
     rebindHours();
     $sheetBody.querySelector('#ps-hours-add').addEventListener('click', () => {
-      draft.hours.push({ date: todayStr(), open: '08:00', close: '17:00' });
+      draft.hours.push({ date: todayStr(), open: '08:00', close: '16:00' });
       render();
     });
 
