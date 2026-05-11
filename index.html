@@ -4,7 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="theme-color" content="#c0392b">
-<title>Rummager</title>
+<title>Fredonia Rummager</title>
+<link rel="icon" href="logo.png">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script type="module">
@@ -38,8 +39,10 @@
     padding: 8px 12px; display: flex; align-items: center; gap: 8px;
     flex-shrink: 0;
   }
-  #header h1 { font-size: 1.05rem; font-weight: 600; flex: 1; }
+  #header h1 { font-size: 1.05rem; font-weight: 600; flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; cursor: pointer; user-select: none; }
   #header h1 .em { font-size: 1.2rem; margin-right: 4px; }
+  #header h1 .brand-logo { height: 44px; width: auto; display: block; }
+  #header h1 .brand-text { font-size: 0.95rem; font-weight: 700; letter-spacing: 0.02em; }
   .counts { font-size: 0.72rem; opacity: 0.95; line-height: 1.1; text-align: right; }
   .counts .row { display: flex; gap: 6px; justify-content: flex-end; }
   .counts .pill { background: rgba(255,255,255,0.2); border-radius: 8px; padding: 1px 6px; }
@@ -491,7 +494,7 @@
 <body>
 
 <div id="header">
-  <h1><span class="em">🛒</span>Rummager</h1>
+  <h1><img class="brand-logo" src="logo.png" alt=""><span class="brand-text">Fredonia Rummager</span></h1>
   <div class="counts" id="counts">
     <div class="row"><span class="pill" id="c-unvisited">— unvisited</span></div>
     <div class="row"><span class="pill" id="c-visited">— visited</span> <span class="pill" id="c-revisit">— revisit</span> <span class="pill" id="c-must">— must</span></div>
