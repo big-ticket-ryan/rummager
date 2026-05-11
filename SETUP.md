@@ -232,3 +232,78 @@ Server security rules only allow cross-user deletes if your auth UID is register
 1. Open the app, tap title 7Ã—, enter the password.
 2. Tap **Wipe ALL public stops**. Done.
 3. Optional: temporarily set the rule for `/publicStops/$id` `.write` to `false` in Firebase to disable all new posts while you investigate.
+
+---
+
+## Fredonia edition — operations notes
+
+### Wiping leftover Belgium public sales (one-time)
+
+The Fredonia rebuild keeps the same Firebase project (ummager-37958), so any old Belgium-area public sales already in /publicStops will appear if their lat/lon happens to fall inside the new Ozaukee bbox. To clear them:
+
+1. Open the live app on a phone you control.
+2. Tap the title bar **7 times** to unlock the admin sheet.
+3. Use **Wipe ALL public stops** to clear /publicStops/* from RTDB.
+4. (Optional) tighten the database rules below so future writes are bbox-validated.
+
+### Recommended Realtime Database rules
+
+In the Firebase Console ? Realtime Database ? Rules, replace the public-stops block with the tighter version below. It validates the new optional fields and constrains the bbox to Ozaukee County:
+
+```json
+{
+  "rules": {
+    "publicStops": {
+      ".read": "auth != null",
+      "15412": {
+        ".write": "auth != null && (!data.exists() || data.child('createdBy').val() == auth.uid)",
+        ".validate": "newData.hasChildren(['lat','lon','addr'])",
+        "lat":          { ".validate": "newData.isNumber() && newData.val() >= 43.30 && newData.val() <= 43.65" },
+        "lon":          { ".validate": "newData.isNumber() && newData.val() >= -88.10 && newData.val() <= -87.65" },
+        "addr":         { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 200" },
+        "name":         { ".validate": "newData.isString() && newData.val().length <= 80" },
+        "sellerName":   { ".validate": "newData.isString() && newData.val().length <= 40" },
+        "items":        { ".validate": "newData.isString() && newData.val().length <= 5000" },
+        "area":         { ".validate": "newData.isString() && newData.val().length <= 60" },
+        "createdBy":    { ".validate": "newData.isString() && newData.val() == auth.uid" },
+        "createdByName":{ ".validate": "newData.isString() && newData.val().length <= 40" },
+        "createdAt":    { ".validate": "newData.isNumber()" },
+        "updatedAt":    { ".validate": "newData.isNumber()" },
+        "pinVerified":  { ".validate": "newData.isBoolean()" },
+        "hours":        { ".validate": "newData.hasChildren() || !newData.exists()" },
+        "priceSlash":   { ".validate": "newData.hasChildren() || !newData.exists()" },
+        "flags":        {},
+        "":       { ".validate": false }
+      }
+    }
+  }
+}
+```
+
+### Map / bbox tuning
+
+If Fredonia residents need a wider catchment, edit two constants near the top of index.html:
+
+- FREDONIA_DEFAULT — initial map center.
+- PUBLIC_BBOX — geofence used by both the tile-precache and the publish-sale validator.
+
+### Realtime Database rules — usage stats block
+
+Append this sibling block under the top-level rules object so the anonymous-user counters work:
+
+```json
+"publicStats": {
+  ".read": "auth != null",
+  "totals": { "": { ".write": "auth != null" } },
+  "daily":  { "": { "": { ".write": "auth != null" } } },
+  "online": {
+    "$uid": {
+      ".write": "auth != null && auth.uid == $uid"
+    }
+  }
+}
+```
+
+(Backticks around $uid are markdown-escapes — use plain $uid in your real rules.)
+
+Remove the row-cap fields if you start hitting Firebase Spark plan caps; an Ozaukee-sized community will fit comfortably.

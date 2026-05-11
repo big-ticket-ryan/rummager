@@ -11,8 +11,8 @@
   // Firebase SDK — imported as ES modules. Exposed on window for the inline script below.
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
   import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-  import { getDatabase, ref, set, update, onValue, onDisconnect, serverTimestamp, remove, get } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js";
-  window.__firebase = { initializeApp, getAuth, signInAnonymously, onAuthStateChanged, getDatabase, ref, set, update, onValue, onDisconnect, serverTimestamp, remove, get };
+  import { getDatabase, ref, set, update, onValue, onDisconnect, serverTimestamp, remove, get, runTransaction, increment, child } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js";
+  window.__firebase = { initializeApp, getAuth, signInAnonymously, onAuthStateChanged, getDatabase, ref, set, update, onValue, onDisconnect, serverTimestamp, remove, get, runTransaction, increment, child };
   window.dispatchEvent(new Event('firebase-ready'));
 </script>
 <style>
@@ -46,20 +46,39 @@
   .icon-btn { width: 38px; height: 38px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 1.1rem; background: rgba(255,255,255,0.18); color: white; }
   .icon-btn:active { background: rgba(255,255,255,0.35); }
 
-  /* ── Filter chip row ── */
+  /* ── Filter dropdown row ── */
   #chipbar {
     display: flex; gap: 6px; padding: 6px 10px; background: #fff;
-    border-bottom: 1px solid var(--c-border); overflow-x: auto;
+    border-bottom: 1px solid var(--c-border);
     flex-shrink: 0; align-items: center;
   }
-  .chip {
-    padding: 4px 10px; border-radius: 14px; font-size: 0.8rem;
+  #filter-btn {
+    padding: 5px 10px; border-radius: 14px; font-size: 0.82rem;
     border: 1px solid #ccc; background: white; white-space: nowrap;
+    display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;
   }
-  .chip.active { background: var(--c-text); color: white; border-color: var(--c-text); }
-  .chip .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: 1px; }
-  #search { flex: 1; min-width: 100px; padding: 5px 9px; border: 1px solid #ccc; border-radius: 14px; font-size: 0.82rem; }
-  #sort-btn { font-size: 1rem; padding: 4px 8px; border: 1px solid #ccc; border-radius: 14px; background: white; }
+  #filter-btn .lbl-current { font-weight: 600; }
+  #filter-btn .caret { font-size: 0.7rem; opacity: 0.6; }
+  #filter-menu {
+    position: absolute; top: 100%; left: 8px; z-index: 900;
+    background: white; border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,0.2);
+    min-width: 180px; overflow: hidden;
+    display: none;
+  }
+  #filter-menu.open { display: block; }
+  #filter-menu button {
+    display: flex; align-items: center; gap: 8px;
+    width: 100%; padding: 10px 14px; font-size: 0.88rem;
+    background: white; border-bottom: 1px solid #eee; text-align: left;
+  }
+  #filter-menu button:last-child { border-bottom: none; }
+  #filter-menu button:active { background: #eef6fc; }
+  #filter-menu button.active { background: #eef6fc; font-weight: 600; }
+  #filter-menu .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  #filter-menu .check { margin-left: auto; color: var(--c-me); font-weight: 700; opacity: 0; }
+  #filter-menu button.active .check { opacity: 1; }
+  #search { flex: 1; min-width: 80px; padding: 5px 9px; border: 1px solid #ccc; border-radius: 14px; font-size: 0.82rem; }
+  #sort-btn { font-size: 1rem; padding: 4px 8px; border: 1px solid #ccc; border-radius: 14px; background: white; flex-shrink: 0; }
 
   /* ── Panels ── */
   #container { flex: 1; display: flex; flex-direction: column; min-height: 0; }
@@ -331,6 +350,142 @@
     #sheet { left: auto; right: 0; bottom: 0; top: 0; max-height: 100vh; max-width: 460px; border-radius: 14px 0 0 0; transform: translateX(100%); }
     #sheet.open { transform: translateX(0); }
   }
+
+  /* Welcome card */
+  #welcome-bg {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+    z-index: 4000; display: none; align-items: center; justify-content: center;
+    padding: 16px;
+  }
+  #welcome-bg.open { display: flex; }
+  #welcome-card {
+    background: white; border-radius: 14px; max-width: 420px; width: 100%;
+    padding: 22px 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+  }
+  #welcome-card h2 { font-size: 1.3rem; margin-bottom: 6px; color: var(--c-unvisited); }
+  #welcome-card p { font-size: 0.92rem; line-height: 1.45; color: var(--c-text); margin: 8px 0; }
+  #welcome-card .row { display: flex; gap: 8px; align-items: flex-start; margin: 10px 0; font-size: 0.9rem; }
+  #welcome-card .row .ico { font-size: 1.4rem; flex-shrink: 0; width: 32px; text-align: center; }
+  #welcome-card .row .text b { color: var(--c-text); }
+  #welcome-card .row .text { color: #444; line-height: 1.4; }
+  #welcome-card .got-it {
+    display: block; width: 100%; margin-top: 14px; padding: 12px;
+    background: var(--c-me); color: white; border-radius: 8px;
+    font-size: 1rem; font-weight: 700;
+  }
+  #welcome-card .got-it:active { background: #1f6da6; }
+
+  /* + FAB menu */
+  #fab-menu-bg {
+    position: fixed; inset: 0; z-index: 800; display: none;
+    background: rgba(0,0,0,0.25);
+  }
+  #fab-menu-bg.open { display: block; }
+  #fab-menu {
+    position: fixed; right: 16px; bottom: 84px; z-index: 801;
+    background: white; border-radius: 12px; box-shadow: 0 6px 24px rgba(0,0,0,0.35);
+    overflow: hidden; min-width: 240px;
+    transform: translateY(8px); opacity: 0; pointer-events: none;
+    transition: transform 0.18s, opacity 0.18s;
+  }
+  #fab-menu.open { transform: translateY(0); opacity: 1; pointer-events: auto; }
+  #fab-menu button {
+    display: flex; align-items: center; gap: 10px;
+    width: 100%; padding: 14px 16px; font-size: 0.95rem;
+    border-bottom: 1px solid #eee; text-align: left; background: white;
+  }
+  #fab-menu button:last-child { border-bottom: none; }
+  #fab-menu button:active { background: #eef6fc; }
+  #fab-menu .ico { font-size: 1.2rem; width: 26px; text-align: center; }
+  #fab-menu .lbl { flex: 1; }
+  #fab-menu .lbl b { display: block; font-weight: 600; color: var(--c-text); }
+  #fab-menu .lbl .sub { font-size: 0.75rem; color: var(--c-muted); }
+  #fab-menu .pub b { color: #8e44ad; }
+
+  /* Pin-verify overlay */
+  #pinverify {
+    position: fixed; inset: 0; z-index: 1500; display: none;
+    pointer-events: none;
+  }
+  #pinverify.open { display: block; }
+  #pinverify .pv-bar {
+    position: absolute; top: 0; left: 0; right: 0;
+    background: rgba(44, 62, 80, 0.95); color: white;
+    padding: 10px 12px; font-size: 0.85rem; line-height: 1.35;
+    pointer-events: auto;
+  }
+  #pinverify .pv-bar b { color: #f1c40f; }
+  #pinverify .pv-pin {
+    position: absolute; left: 50%; top: 50%;
+    transform: translate(-50%, -100%);
+    width: 36px; height: 54px;
+    pointer-events: none;
+    filter: drop-shadow(0 4px 6px rgba(0,0,0,0.5));
+  }
+  #pinverify .pv-actions {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    display: flex; gap: 8px; padding: 10px;
+    background: rgba(255,255,255,0.96);
+    pointer-events: auto;
+    border-top: 1px solid var(--c-border);
+  }
+  #pinverify .pv-actions button {
+    flex: 1; padding: 12px; border-radius: 8px; font-size: 0.95rem; font-weight: 700;
+  }
+  #pinverify .pv-confirm { background: var(--c-visited); color: white; }
+  #pinverify .pv-cancel { background: #ddd; color: var(--c-text); }
+
+  /* Hours editor + display */
+  .hours-editor .h-row {
+    display: flex; gap: 6px; align-items: center; margin: 6px 0;
+    padding: 6px; background: #f8f8f8; border-radius: 6px;
+  }
+  .hours-editor .h-row input[type=date] { flex: 2; min-width: 0; padding: 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.85rem; }
+  .hours-editor .h-row input[type=time] { flex: 1; min-width: 0; padding: 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.85rem; }
+  .hours-editor .h-row .h-rm { background: #fbecea; color: #a93226; border-radius: 4px; padding: 4px 8px; font-size: 0.8rem; flex-shrink: 0; }
+  .hours-editor .h-add {
+    display: block; width: 100%; padding: 8px; margin-top: 6px;
+    background: #eef6fc; color: var(--c-me); border: 1px dashed var(--c-me);
+    border-radius: 6px; font-size: 0.85rem; font-weight: 600;
+  }
+  .hours-display { font-size: 0.88rem; line-height: 1.5; }
+  .hours-display .day { display: flex; gap: 8px; padding: 2px 0; }
+  .hours-display .day .d { font-weight: 600; min-width: 110px; }
+  .open-pill {
+    display: inline-block; padding: 2px 8px; border-radius: 10px;
+    font-size: 0.75rem; font-weight: 700; margin-left: 6px;
+  }
+  .open-pill.open { background: #d4edda; color: #1e7e34; }
+  .open-pill.soon { background: #fff3cd; color: #856404; }
+  .open-pill.closed { background: #eee; color: #777; }
+
+  /* Price slash banners + badges */
+  .slash-banner {
+    background: #fff3cd; border-left: 4px solid #f1c40f;
+    padding: 10px 12px; margin: 8px 0; border-radius: 4px;
+    font-size: 0.88rem;
+  }
+  .slash-banner.lightning { background: #fff0e6; border-color: #e67e22; }
+  .slash-banner b { color: #2c3e50; }
+  .slash-banner .when { font-size: 0.72rem; color: var(--c-muted); margin-left: 6px; }
+  .slash-banner ul { margin: 6px 0 0 18px; }
+  .slash-banner li { margin: 2px 0; }
+  .slash-banner img { max-width: 90px; max-height: 90px; border-radius: 4px; margin-right: 4px; vertical-align: middle; }
+
+  .marker-badges {
+    position: absolute; top: -6px; right: -10px; z-index: 5;
+    display: flex; flex-direction: column; gap: 2px; align-items: flex-end;
+  }
+  .marker-badges .mb {
+    background: #f1c40f; color: #2c3e50; font-weight: 700;
+    font-size: 0.62rem; padding: 1px 5px; border-radius: 8px;
+    border: 1.5px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    letter-spacing: 0.4px; white-space: nowrap;
+  }
+  .marker-badges .mb.slash { background: #f1c40f; }
+  .marker-badges .mb.lightning { background: #e67e22; color: white; }
+  .marker-badges .mb.new { background: #2980b9; color: white; }
+  .marker-badges .mb.mine { background: #8e44ad; color: white; }
 </style>
 </head>
 <body>
@@ -338,8 +493,8 @@
 <div id="header">
   <h1><span class="em">🛒</span>Rummager</h1>
   <div class="counts" id="counts">
-    <div class="row"><span class="pill" id="c-unvisited">— to go</span></div>
-    <div class="row"><span class="pill" id="c-visited">— done</span> <span class="pill" id="c-revisit">— ★</span> <span class="pill" id="c-must">— ❗</span></div>
+    <div class="row"><span class="pill" id="c-unvisited">— unvisited</span></div>
+    <div class="row"><span class="pill" id="c-visited">— visited</span> <span class="pill" id="c-revisit">— revisit</span> <span class="pill" id="c-must">— must</span></div>
   </div>
   <button class="icon-btn" id="btn-locate" title="Center on me">📍</button>
   <button class="icon-btn" id="btn-group" title="Group sharing">👥</button>
@@ -351,20 +506,26 @@
   <button id="share-banner-stop">Stop</button>
 </div>
 
-<div id="chipbar">
-  <button class="chip active" data-filter="all">All</button>
-  <button class="chip" data-filter="unvisited"><span class="dot" style="background:var(--c-unvisited)"></span>To go</button>
-  <button class="chip" data-filter="visited"><span class="dot" style="background:var(--c-visited)"></span>Done</button>
-  <button class="chip" data-filter="revisit"><span class="dot" style="background:var(--c-revisit)"></span>★</button>
-  <button class="chip" data-filter="must"><span class="dot" style="background:var(--c-must)"></span>❗ Must</button>
-  <input type="text" id="search" placeholder="Search…" />
+<div id="chipbar" style="position:relative;">
+  <button id="filter-btn" type="button" aria-haspopup="true"><span>Filter:</span> <span class="lbl-current" id="filter-current-label">All</span> <span class="caret">▾</span></button>
+  <div id="filter-menu" role="menu">
+    <button data-filter="all" class="active"><span class="dot" style="background:#ddd;border:1px solid #999;"></span>All<span class="check">✓</span></button>
+    <button data-filter="unvisited"><span class="dot" style="background:var(--c-unvisited)"></span>Unvisited<span class="check">✓</span></button>
+    <button data-filter="visited"><span class="dot" style="background:var(--c-visited)"></span>Visited<span class="check">✓</span></button>
+    <button data-filter="revisit"><span class="dot" style="background:var(--c-revisit)"></span>Revisit<span class="check">✓</span></button>
+    <button data-filter="must"><span class="dot" style="background:var(--c-must)"></span>Must visit<span class="check">✓</span></button>
+  </div>
+  <form id="search-form" style="flex:1;display:flex;gap:4px;align-items:center;min-width:0;" onsubmit="return false;">
+    <input type="text" id="search" placeholder="Search…" enterkeyhint="search" />
+    <button type="submit" id="search-go" title="Search" style="padding:5px 10px;border:1px solid #ccc;border-radius:14px;background:var(--c-me);color:white;font-size:0.82rem;font-weight:600;flex-shrink:0;">🔍</button>
+  </form>
   <button id="sort-btn" title="Sort">⇅</button>
 </div>
 
 <div id="panel-toolbar">
   <button id="tog-map" class="toggle-btn active">Map</button>
   <button id="tog-list" class="toggle-btn active">List</button>
-  <button id="route-btn" class="toggle-btn" title="Route to all Must Visit stops">🗺️ Route</button>
+  <button id="route-btn" class="toggle-btn" title="Route to all Must Visit stops">🗺️ Route Must Visits</button>
   <span class="spacer"></span>
   <button id="gps-toggle" class="gps-btn off" title="Live GPS tracking"><span class="gps-dot"></span><span id="gps-toggle-label">GPS</span></button>
 </div>
@@ -379,7 +540,39 @@
   </div>
 </div>
 
-<button id="fab" title="Quick add at my GPS location">📍＋</button>
+<button id="fab" title="Add a stop or publish a public sale">➕</button>
+
+<!-- + FAB menu -->
+<div id="fab-menu-bg"></div>
+<div id="fab-menu">
+  <button id="menu-publish" class="pub">
+    <span class="ico">🏷️</span>
+    <span class="lbl"><b>Publish a public sale</b><span class="sub">Everyone in town will see it</span></span>
+  </button>
+  <button id="menu-add-stop">
+    <span class="ico">📍</span>
+    <span class="lbl"><b>Add a stop (private)</b><span class="sub">Just for your map &mdash; not shared</span></span>
+  </button>
+  <button id="menu-add-gps">
+    <span class="ico">📡</span>
+    <span class="lbl"><b>Quick-add at my GPS</b><span class="sub">Drop a pin where I'm standing</span></span>
+  </button>
+</div>
+
+<!-- Pin verify overlay -->
+<div id="pinverify">
+  <div class="pv-bar">
+    <b>Place your pin</b> &mdash; drag the map under the marker, or long-press the map to drop it elsewhere. Tap <b>Confirm pin</b> when correct.
+  </div>
+  <svg class="pv-pin" viewBox="0 0 28 42" xmlns="http://www.w3.org/2000/svg">
+    <path d="M14 0C6.3 0 0 6.3 0 14c0 10.5 14 28 14 28s14-17.5 14-28C28 6.3 21.7 0 14 0z" fill="#8e44ad" stroke="#fff" stroke-width="2"/>
+    <circle cx="14" cy="14" r="6" fill="#fff"/>
+  </svg>
+  <div class="pv-actions">
+    <button class="pv-cancel" id="pv-cancel">Cancel</button>
+    <button class="pv-confirm" id="pv-confirm">✓ Confirm pin</button>
+  </div>
+</div>
 
 <!-- Bottom sheet -->
 <div id="sheet-bg"></div>
@@ -399,16 +592,27 @@
 
 <div id="toast"></div>
 
+<!-- Welcome card (first launch only) -->
+<div id="welcome-bg">
+  <div id="welcome-card">
+    <h2>🛍️ Welcome to Rummager — Fredonia, WI</h2>
+    <p>Find every rummage sale in town and plan your route.</p>
+    <div class="row"><div class="ico">🗺️</div><div class="text"><b>Browse:</b> tap any pin or list row to see details, hours, and photos.</div></div>
+    <div class="row"><div class="ico">➕</div><div class="text"><b>Publish your sale:</b> tap the blue <b>+</b> button → <b>Publish a public sale</b>. Everyone in town will see it.</div></div>
+    <div class="row"><div class="ico">⚡</div><div class="text"><b>Lightning deals:</b> after publishing, you can mark <b>$⬇ prices reduced</b> or post specific <b>⚡ lightning items</b> from your sale's detail screen.</div></div>
+    <button class="got-it" id="welcome-dismiss">Got it — let's go</button>
+  </div>
+</div>
+
 <script>
 'use strict';
 
 // ──────────────────────────────────────────────────────────────────────────
-// Seed data — 65 Belgium WI rummage sales
-// Addresses + manualCoords lifted verbatim from belgium-rummage-map.html
-// (already hand-corrected and known good).
-// Stops without manual coords will be geocoded on first run and cached.
+// Seed data — Fredonia, WI starts empty.
+// All sales are seller-published into the public feed (Firebase /publicStops)
+// and auto-merged into each user's local list by the reconciler.
 // ──────────────────────────────────────────────────────────────────────────
-const SEED_STOPS = [
+const SEED_STOPS_DISABLED = [
   { addr: "5780 Lake Church Rd", area: "Lake Church", items: "Honey, toys, books, stuffed animals, vintage home goods & décor, seasonal, kids & adults clothing, free stuff" },
   { addr: "825 Co Rd D", area: "Lake Church", items: "Young misses small-medium, misses jeans size 4 lots, house décor, quilts, file cabinet, some men's, puzzles, baby toys, Graco play pen/sheet, lots too much to list" },
   { addr: "300 S Royal Ave", area: "Belgium", items: "Washer, dryer, 2 freezers, 2 window air conditioners (Belgium Storage #34)" },
@@ -474,9 +678,10 @@ const SEED_STOPS = [
   { addr: "311 Log Cabin Ln", area: "Belgium", items: "Tree stands, decoys, new mountain bike, round kitchen table w/4 chairs, Jeep soft top (Wrangler JK 4 door), juniors & women's clothing, household, Disney collectibles, Harley Davidson items" },
   { addr: "1734 Co Rd D", area: "Town of Belgium", items: "Furniture, tools, antiques, clothing, housewares, glassware, Howard Miller Clock, books" },
 ];
+const SEED_STOPS = []; // Fredonia: no preloaded data
 
-// Manual coordinates lifted from belgium-rummage-map.html for stops Nominatim missed
-const MANUAL_COORDS = {
+// Manual coordinates (legacy reference — unused for Fredonia)
+const MANUAL_COORDS_LEGACY = {
   "825 Co Rd D":              { lat: 43.499455, lon: -87.824076 },
   "1734 Co Rd D":             { lat: 43.499551, lon: -87.871202 },
   "5540 County Rd LL":        { lat: 43.479559, lon: -87.840242 },
@@ -487,13 +692,14 @@ const MANUAL_COORDS = {
   "350 Main St":              { lat: 43.500500, lon: -87.840100 },
   "Belgium Memorial Post 412":{ lat: 43.499700, lon: -87.849000 },
 };
+const MANUAL_COORDS = {}; // Fredonia: no manual seed coords
 
 // ──────────────────────────────────────────────────────────────────────────
 // Storage layer
 // ──────────────────────────────────────────────────────────────────────────
-const STORAGE_KEY = 'rummager.v1';
-const SCHEMA_VERSION = 1;
-let state = { version: SCHEMA_VERSION, stops: [] };
+const STORAGE_KEY = 'rummager.fredonia.v1';
+const SCHEMA_VERSION = 2;
+let state = { version: SCHEMA_VERSION, stops: [], welcomeSeen: false, mySaleId: null, newAcks: {} };
 
 function uid() {
   return 'r-' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
@@ -505,33 +711,21 @@ function load() {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (parsed && parsed.version === SCHEMA_VERSION && Array.isArray(parsed.stops)) {
-        state = parsed;
+        state = Object.assign(
+          { version: SCHEMA_VERSION, stops: [], welcomeSeen: false, mySaleId: null, newAcks: {} },
+          parsed
+        );
+        // Defensive: ensure containers exist
+        state.stops = state.stops || [];
+        state.newAcks = state.newAcks || {};
         return;
       }
     }
   } catch (e) {
-    console.warn('Storage load failed, reseeding:', e);
+    console.warn('Storage load failed, starting fresh:', e);
   }
-  // First run — seed
-  state = { version: SCHEMA_VERSION, stops: [] };
-  const now = Date.now();
-  SEED_STOPS.forEach((s, i) => {
-    const mc = MANUAL_COORDS[s.addr];
-    state.stops.push({
-      id: 'seed-' + i,
-      addr: s.addr,
-      area: s.area || '',
-      items: s.items || '',
-      lat: mc ? mc.lat : null,
-      lon: mc ? mc.lon : null,
-      source: 'preloaded',
-      status: 'unvisited',
-      note: '',
-      photos: [],
-      createdAt: now,
-      updatedAt: now,
-    });
-  });
+  // First run — Fredonia starts empty.
+  state = { version: SCHEMA_VERSION, stops: [], welcomeSeen: false, mySaleId: null, newAcks: {} };
   save();
 }
 
@@ -556,9 +750,10 @@ function save() {
 function findStop(id) { return state.stops.find(s => s.id === id); }
 
 // ──────────────────────────────────────────────────────────────────────────
-// Map setup
+// Map setup — Fredonia, WI
 // ──────────────────────────────────────────────────────────────────────────
-const map = L.map('map', { zoomControl: true, tap: true }).setView([43.4997, -87.8504], 14);
+const FREDONIA_DEFAULT = { lat: 43.470, lon: -87.853 };
+const map = L.map('map', { zoomControl: true, tap: true }).setView([FREDONIA_DEFAULT.lat, FREDONIA_DEFAULT.lon], 14);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; OpenStreetMap',
   maxZoom: 19,
@@ -569,7 +764,10 @@ let meMarker = null;
 let watchId = null;
 let lastKnownPos = null; // { lat, lon }
 
-function makeIcon(status) {
+function makeIcon(stop) {
+  // Backwards-compat: a string status was passed in some places.
+  const isStop = stop && typeof stop === 'object';
+  const status = isStop ? stop.status : stop;
   const color = status === 'visited' ? 'var(--c-visited)'
               : status === 'revisit' ? 'var(--c-revisit)'
               : status === 'must'    ? 'var(--c-must)'
@@ -579,13 +777,40 @@ function makeIcon(status) {
     status === 'visited' ? '--c-visited' : status === 'revisit' ? '--c-revisit' : status === 'must' ? '--c-must' : '--c-unvisited'
   ).trim() || '#c0392b';
   const glyph = status === 'visited' ? '✓' : status === 'revisit' ? '★' : status === 'must' ? '!' : '';
+
+  // Badges (only for full stop objects)
+  let badgesHtml = '';
+  if (isStop) {
+    const badges = [];
+    if (state.mySaleId && stop.publicId === state.mySaleId) {
+      badges.push(`<span class="mb mine" title="Your published sale">MINE</span>`);
+    }
+    if (window.PublicStops && window.PublicStops.isNew && window.PublicStops.isNew(stop)) {
+      badges.push(`<span class="mb new">NEW</span>`);
+    }
+    const ps = stop.priceSlash;
+    if (ps && ps.generic && ps.generic.active) {
+      badges.push(`<span class="mb slash" title="Prices reduced">$⬇</span>`);
+    }
+    if (ps && ps.items && ps.items.active && Array.isArray(ps.items.list) && ps.items.list.length > 0) {
+      const n = ps.items.list.length;
+      badges.push(`<span class="mb lightning" title="Lightning deals">⚡${n > 1 ? n : ''}</span>`);
+    }
+    if (badges.length) {
+      badgesHtml = `<div class="marker-badges">${badges.join('')}</div>`;
+    }
+  }
+
   return L.divIcon({
     className: 'rm-marker',
-    html: `<svg width="28" height="42" viewBox="0 0 28 42" xmlns="http://www.w3.org/2000/svg">
-      <path d="M14 0C6.3 0 0 6.3 0 14c0 10.5 14 28 14 28s14-17.5 14-28C28 6.3 21.7 0 14 0z" fill="${cssColor}" stroke="#222" stroke-width="1"/>
-      <circle cx="14" cy="14" r="6" fill="#fff"/>
-      <text x="14" y="17.5" text-anchor="middle" font-size="9" font-weight="bold" fill="${cssColor}">${glyph}</text>
-    </svg>`,
+    html: `<div style="position:relative;width:28px;height:42px;">
+      <svg width="28" height="42" viewBox="0 0 28 42" xmlns="http://www.w3.org/2000/svg">
+        <path d="M14 0C6.3 0 0 6.3 0 14c0 10.5 14 28 14 28s14-17.5 14-28C28 6.3 21.7 0 14 0z" fill="${cssColor}" stroke="#222" stroke-width="1"/>
+        <circle cx="14" cy="14" r="6" fill="#fff"/>
+        <text x="14" y="17.5" text-anchor="middle" font-size="9" font-weight="bold" fill="${cssColor}">${glyph}</text>
+      </svg>
+      ${badgesHtml}
+    </div>`,
     iconSize: [28, 42],
     iconAnchor: [14, 42],
     popupAnchor: [0, -38],
@@ -593,20 +818,26 @@ function makeIcon(status) {
 }
 
 function popupHtml(stop) {
-  return `<div class="pop-addr">${escapeHtml(stop.addr)}</div>
-    ${stop.area && stop.area !== 'Belgium' ? `<div class="pop-area">${escapeHtml(stop.area)}</div>` : ''}
+  return `<div class="pop-addr">${escapeHtml(stop.name || stop.addr)}</div>
+    ${stop.name ? `<div class="pop-area">${escapeHtml(stop.addr)}</div>` : ''}
+    ${stop.area && stop.area !== 'Fredonia' ? `<div class="pop-area">${escapeHtml(stop.area)}</div>` : ''}
     <button class="pop-open" data-open-id="${stop.id}">Open details</button>`;
 }
 
 function ensureMarker(stop) {
   if (stop.lat == null || stop.lon == null) return;
+  // Respect active filter: if this stop doesn't match, remove its marker.
+  if (typeof activeFilter !== 'undefined' && activeFilter !== 'all' && stop.status !== activeFilter) {
+    removeMarker(stop.id);
+    return;
+  }
   let m = markersById[stop.id];
   if (m) {
     m.setLatLng([stop.lat, stop.lon]);
-    m.setIcon(makeIcon(stop.status));
+    m.setIcon(makeIcon(stop));
     m.setPopupContent(popupHtml(stop));
   } else {
-    m = L.marker([stop.lat, stop.lon], { icon: makeIcon(stop.status) }).addTo(map);
+    m = L.marker([stop.lat, stop.lon], { icon: makeIcon(stop) }).addTo(map);
     m.bindPopup(popupHtml(stop));
     markersById[stop.id] = m;
   }
@@ -629,8 +860,14 @@ document.addEventListener('click', (e) => {
 });
 
 function refreshAllMarkers() {
-  // Add/update markers for stops with coords
-  state.stops.forEach(ensureMarker);
+  // Map respects active filter: hide non-matching markers.
+  state.stops.forEach(s => {
+    if (activeFilter !== 'all' && s.status !== activeFilter) {
+      removeMarker(s.id);
+    } else {
+      ensureMarker(s);
+    }
+  });
   // Remove markers whose stops were deleted
   Object.keys(markersById).forEach(id => {
     if (!findStop(id)) removeMarker(id);
@@ -656,7 +893,7 @@ async function nominatimSearch(query) {
 }
 
 async function censusGeocode(addr) {
-  const fullAddr = addr + ', Belgium, WI 53004';
+  const fullAddr = addr + ', Fredonia, WI 53021';
   const url = `https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address=${encodeURIComponent(fullAddr)}&benchmark=Public_AR_Current&format=json`;
   try {
     const resp = await fetch(url);
@@ -685,11 +922,10 @@ async function reverseGeocode(lat, lon) {
 }
 
 async function geocodeAddress(addr, area) {
-  const a = (area || 'Belgium');
-  let q = addr + (a === 'Lake Church' ? ', Lake Church, Ozaukee County, WI'
-              : a === 'Town of Belgium' ? ', Town of Belgium, Ozaukee County, WI'
-              : ', Belgium, Ozaukee County, WI');
+  const a = (area || 'Fredonia');
+  let q = addr + ', ' + a + ', Ozaukee County, WI';
   let data = await nominatimSearch(q);
+  if (data.length === 0) data = await nominatimSearch(addr + ', Fredonia, Ozaukee County, WI');
   if (data.length === 0) data = await nominatimSearch(addr + ', Ozaukee County, WI');
   if (data.length === 0 && /co\s+rd\b/i.test(addr)) {
     data = await nominatimSearch(addr.replace(/co\s+rd\b/i, 'County Road') + ', Ozaukee County, WI');
@@ -698,25 +934,6 @@ async function geocodeAddress(addr, area) {
     return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
   }
   return await censusGeocode(addr);
-}
-
-// First-run geocode for any preloaded stop missing coords
-async function geocodeMissingSeeds() {
-  const missing = state.stops.filter(s => s.source === 'preloaded' && (s.lat == null || s.lon == null));
-  if (missing.length === 0) return;
-  toast(`Geocoding ${missing.length} preloaded stops…`);
-  for (let i = 0; i < missing.length; i++) {
-    const s = missing[i];
-    try {
-      const r = await geocodeAddress(s.addr, s.area);
-      if (r) { s.lat = r.lat; s.lon = r.lon; ensureMarker(s); }
-    } catch (e) { console.warn('geocode failed for', s.addr, e); }
-    await new Promise(r => setTimeout(r, 1100)); // Nominatim rate limit
-  }
-  save();
-  renderList();
-  fitToMarkers();
-  toast('Geocoding done.');
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -776,10 +993,10 @@ function renderCounts() {
     else if (s.status === 'must') m++;
     else u++;
   });
-  $counts.unvisited.textContent = `${u} to go`;
-  $counts.visited.textContent = `${v} done`;
-  $counts.revisit.textContent = `${r} ★`;
-  $counts.must.textContent = `${m} ❗`;
+  $counts.unvisited.textContent = `${u} unvisited`;
+  $counts.visited.textContent = `${v} visited`;
+  $counts.revisit.textContent = `${r} revisit`;
+  $counts.must.textContent = `${m} must`;
 }
 
 function renderList() {
@@ -794,22 +1011,40 @@ function renderList() {
     const dist = (sortMode === 'distance' && lastKnownPos && s.lat != null)
       ? haversineMiles(lastKnownPos.lat, lastKnownPos.lon, s.lat, s.lon).toFixed(1) + ' mi'
       : null;
+    const isNew = window.PublicStops && window.PublicStops.isNew && window.PublicStops.isNew(s);
+    const isMine = state.mySaleId && s.publicId === state.mySaleId;
+    const ps = s.priceSlash;
+    const hasGenSlash = ps && ps.generic && ps.generic.active;
+    const hasItemSlash = ps && ps.items && ps.items.active && Array.isArray(ps.items.list) && ps.items.list.length > 0;
+    const openNow = computeOpenStatus(s.hours);
+    const titleText = s.name || s.addr;
+    const subText = s.name ? s.addr : (s.area && s.area !== 'Fredonia' ? s.area : '');
     div.innerHTML = `
       ${s.photos[0] ? `<img class="thumb" src="${s.photos[0]}" alt="">` : ''}
       <span class="sw ${s.status}"></span>
       <div class="body">
-        <div class="addr">${escapeHtml(s.addr)}</div>
-        ${s.area && s.area !== 'Belgium' ? `<div class="area">${escapeHtml(s.area)}</div>` : ''}
+        <div class="addr">${escapeHtml(titleText)}
+          ${isNew ? `<span class="badge" style="background:#2980b9;color:white;">NEW</span>` : ''}
+          ${isMine ? `<span class="badge" style="background:#8e44ad;color:white;">MINE</span>` : ''}
+          ${hasGenSlash ? `<span class="badge" style="background:#f1c40f;color:#2c3e50;">$⬇</span>` : ''}
+          ${hasItemSlash ? `<span class="badge" style="background:#e67e22;color:white;">⚡${ps.items.list.length > 1 ? ps.items.list.length : ''}</span>` : ''}
+          ${openNow.label === 'Open now' ? `<span class="badge" style="background:#d4edda;color:#1e7e34;">Open now</span>` : ''}
+        </div>
+        ${subText ? `<div class="area">${escapeHtml(subText)}</div>` : ''}
         ${blurb ? `<div class="blurb">${escapeHtml(blurb)}</div>` : ''}
         <div class="badges">
           ${s.note   ? `<span class="badge note">📝 note</span>` : ''}
           ${s.photos.length ? `<span class="badge photo">📷 ${s.photos.length}</span>` : ''}
           ${dist     ? `<span class="badge dist">${dist}</span>` : ''}
-          ${s.source !== 'preloaded' ? `<span class="badge">added</span>` : ''}
+          ${s.source === 'public' && !isMine ? `<span class="badge">by ${escapeHtml(s.createdByName || 'Anonymous')}</span>` : ''}
+          ${s.source === 'manual' || s.source === 'gps' ? `<span class="badge">private</span>` : ''}
         </div>
       </div>
     `;
-    div.addEventListener('click', () => focusStopOnMap(s.id));
+    div.addEventListener('click', () => {
+      focusStopOnMap(s.id);
+      if (isNew) window.PublicStops.ackNew(s.publicId);
+    });
     frag.appendChild(div);
   });
   $entries.appendChild(frag);
@@ -827,6 +1062,10 @@ function openSheet(id) {
   openSheetId = id;
   const s = findStop(id);
   if (!s) return;
+  // Acknowledge NEW badge on open
+  if (s.publicId && window.PublicStops && window.PublicStops.isNew(s)) {
+    window.PublicStops.ackNew(s.publicId);
+  }
   $sheetBody.innerHTML = renderSheet(s);
   $sheetBg.classList.add('open');
   $sheet.classList.add('open');
@@ -857,9 +1096,40 @@ function closeSheet() {
 }
 
 function renderSheet(s) {
-  const isPreloaded = s.source === 'preloaded';
+  const isPublic = s.source === 'public';
+  const isMine = isPublic && state.mySaleId && s.publicId === state.mySaleId;
+  const editable = !isPublic || isMine; // private stops always editable; public only if mine
+  const ps = s.priceSlash || {};
+  const hasGen = ps.generic && ps.generic.active;
+  const hasItems = ps.items && ps.items.active && Array.isArray(ps.items.list) && ps.items.list.length > 0;
+
+  const titleHtml = s.name
+    ? `<h2>${escapeHtml(s.name)}</h2><div style="font-size:0.85rem;color:var(--c-muted);margin-bottom:6px;">${escapeHtml(s.addr)}${s.sellerName ? ' · by <b>' + escapeHtml(s.sellerName) + '</b>' : ''}${isMine ? ' <span class="badge" style="background:#8e44ad;color:white;">YOUR SALE</span>' : ''}</div>`
+    : `<h2>${escapeHtml(s.addr) || 'Unnamed stop'}</h2>${isMine ? '<div><span class="badge" style="background:#8e44ad;color:white;">YOUR SALE</span></div>' : ''}`;
+
+  const slashBanners = [
+    hasGen ? `<div class="slash-banner"><b>$⬇ Prices reduced!</b><span class="when">${ageString(ps.generic.ts)}</span></div>` : '',
+    hasItems ? `<div class="slash-banner lightning"><b>⚡ Lightning deals!</b><span class="when">${ageString(ps.items.ts)}</span><ul>${
+      ps.items.list.map(it => `<li>${it.photo ? `<img src="${it.photo}" alt="">` : ''}<b>${escapeHtml(it.name)}</b>${it.newPrice ? ' — ' + escapeHtml(it.newPrice) : ''}</li>`).join('')
+    }</ul></div>` : ''
+  ].join('');
+
+  const hoursHtml = renderHoursDisplay(s.hours);
+
+  const ownerSlashControls = isMine ? `
+    <label>Price reductions</label>
+    <div class="sheet-actions" style="margin-top:0;">
+      <button class="${hasGen ? 'btn-danger' : 'btn-primary'}" id="b-slash-gen">${hasGen ? 'Clear $⬇ reduced' : '$⬇ Mark prices reduced'}</button>
+      <button class="btn-primary" id="b-slash-items" style="background:#e67e22;">⚡ ${hasItems ? 'Edit lightning items' : 'Reduce specific items…'}</button>
+      ${hasItems ? `<button class="btn-danger" id="b-slash-items-clear">Clear ⚡</button>` : ''}
+    </div>
+  ` : '';
+
   return `
-    <h2>${escapeHtml(s.addr) || 'Unnamed stop'}</h2>
+    ${titleHtml}
+    ${slashBanners}
+    ${hoursHtml}
+
     <label>Status</label>
     <div class="status-row">
       <button class="unvisited ${s.status==='unvisited'?'active':''}" data-status="unvisited">Unvisited</button>
@@ -868,17 +1138,23 @@ function renderSheet(s) {
       <button class="must ${s.status==='must'?'active':''}" data-status="must">Must ❗</button>
     </div>
 
-    <label>Address</label>
+    ${editable ? `<label>Address</label>
     <input type="text" id="f-addr" value="${escapeHtml(s.addr)}" />
 
     <label>Area</label>
-    <input type="text" id="f-area" value="${escapeHtml(s.area)}" />
+    <input type="text" id="f-area" value="${escapeHtml(s.area)}" />` : ''}
 
-    <label>Note</label>
+    <label>${isPublic && !isMine ? 'My private note' : 'Note'}</label>
     <textarea id="f-note" placeholder="Add a personal note…">${escapeHtml(s.note)}</textarea>
 
-    ${isPreloaded ? `<label>Items (from flyer)</label>
-      <textarea id="f-items">${escapeHtml(s.items)}</textarea>` : ''}
+    ${(s.items && (!editable || isPublic)) ? `<label>Sale items${isMine ? '' : ' (from seller)'}</label>
+      ${editable
+        ? `<textarea id="f-items">${escapeHtml(s.items)}</textarea>`
+        : `<div style="white-space:pre-wrap;font-size:0.88rem;line-height:1.4;padding:6px 0;">${escapeHtml(s.items)}</div>`}` : ''}
+    ${(editable && !isPublic) ? `<label>Items</label>
+      <textarea id="f-items" placeholder="What's at this stop?">${escapeHtml(s.items)}</textarea>` : ''}
+
+    ${ownerSlashControls}
 
     <label>Photos (${s.photos.length})</label>
     <div class="photo-grid" id="photo-grid">
@@ -891,14 +1167,19 @@ function renderSheet(s) {
     <div class="sheet-actions">
       ${s.lat != null ? `<button class="btn-primary" id="b-nav">🧭 Navigate</button>` : ''}
       <button class="btn-secondary" id="b-save">Save</button>
-      ${!isPreloaded ? `<button class="btn-danger" id="b-del">Delete</button>` : ''}
+      ${isMine ? `<button class="btn-secondary" id="b-edit-sale">✏️ Edit my sale</button>` : ''}
+      ${isMine ? `<button class="btn-danger" id="b-del-sale">Delete my sale</button>` : ''}
+      ${(!isPublic && (s.source === 'manual' || s.source === 'gps')) ? `<button class="btn-danger" id="b-del">Delete</button>` : ''}
       <button class="btn-close" id="b-close">Close</button>
     </div>
   `;
 }
 
 function wireSheet(s) {
-  // Status buttons
+  const isPublic = s.source === 'public';
+  const isMine = isPublic && state.mySaleId && s.publicId === state.mySaleId;
+
+  // Status buttons (always editable — status is local)
   $sheetBody.querySelectorAll('.status-row button').forEach(btn => {
     btn.addEventListener('click', () => {
       const newStatus = btn.dataset.status;
@@ -911,33 +1192,40 @@ function wireSheet(s) {
     });
   });
 
-  // Note autosave
+  // Note autosave (always editable — note is local)
   const $note = $sheetBody.querySelector('#f-note');
-  $note.addEventListener('blur', () => {
-    if (s.note !== $note.value) { s.note = $note.value; s.updatedAt = Date.now(); save(); renderList(); }
-  });
+  if ($note) {
+    $note.addEventListener('blur', () => {
+      if (s.note !== $note.value) { s.note = $note.value; s.updatedAt = Date.now(); save(); renderList(); }
+    });
+  }
 
-  // Save button
-  $sheetBody.querySelector('#b-save').addEventListener('click', async () => {
-    const newAddr = $sheetBody.querySelector('#f-addr').value.trim();
-    const newArea = $sheetBody.querySelector('#f-area').value.trim();
-    const newNote = $sheetBody.querySelector('#f-note').value;
-    const itemsEl = $sheetBody.querySelector('#f-items');
-    const newItems = itemsEl ? itemsEl.value : s.items;
-    const addrChanged = newAddr !== s.addr;
-    s.addr = newAddr; s.area = newArea; s.note = newNote; s.items = newItems;
-    s.updatedAt = Date.now();
-    save(); renderList();
-    if (addrChanged && newAddr) {
-      toast('Re-geocoding…');
-      const r = await geocodeAddress(newAddr, newArea);
-      if (r) { s.lat = r.lat; s.lon = r.lon; ensureMarker(s); save(); toast('Address relocated.'); }
-      else toast('Could not geocode new address.');
-    }
-    closeSheet();
-  });
+  // Save button (private stops only — public sales use Edit my sale)
+  const saveBtn = $sheetBody.querySelector('#b-save');
+  if (saveBtn) {
+    saveBtn.addEventListener('click', async () => {
+      const addrEl = $sheetBody.querySelector('#f-addr');
+      const areaEl = $sheetBody.querySelector('#f-area');
+      const itemsEl = $sheetBody.querySelector('#f-items');
+      const newNote = $note ? $note.value : s.note;
+      const newAddr = addrEl ? addrEl.value.trim() : s.addr;
+      const newArea = areaEl ? areaEl.value.trim() : s.area;
+      const newItems = itemsEl ? itemsEl.value : s.items;
+      const addrChanged = newAddr !== s.addr;
+      s.addr = newAddr; s.area = newArea; s.note = newNote; s.items = newItems;
+      s.updatedAt = Date.now();
+      save(); renderList();
+      if (!isPublic && addrChanged && newAddr) {
+        toast('Re-geocoding…');
+        const r = await geocodeAddress(newAddr, newArea);
+        if (r) { s.lat = r.lat; s.lon = r.lon; ensureMarker(s); save(); toast('Address relocated.'); }
+        else toast('Could not geocode new address.');
+      }
+      closeSheet();
+    });
+  }
 
-  // Delete
+  // Delete (private only)
   const delBtn = $sheetBody.querySelector('#b-del');
   if (delBtn) {
     delBtn.addEventListener('click', () => {
@@ -945,6 +1233,57 @@ function wireSheet(s) {
       removeMarker(s.id);
       state.stops = state.stops.filter(x => x.id !== s.id);
       save(); renderList(); closeSheet();
+    });
+  }
+
+  // Owner: edit my sale
+  const editSaleBtn = $sheetBody.querySelector('#b-edit-sale');
+  if (editSaleBtn) {
+    editSaleBtn.addEventListener('click', () => {
+      closeSheet();
+      openPublishSaleSheet({ editPublicId: s.publicId });
+    });
+  }
+
+  // Owner: delete my sale (deletes from server; reconciler will remove locally)
+  const delSaleBtn = $sheetBody.querySelector('#b-del-sale');
+  if (delSaleBtn) {
+    delSaleBtn.addEventListener('click', async () => {
+      if (!confirm('Delete your sale? Everyone in town will stop seeing it.')) return;
+      const ok = await window.PublicStops.deleteOne(s.publicId);
+      if (ok) { closeSheet(); toast('Sale deleted.'); }
+      else toast('Delete failed.');
+    });
+  }
+
+  // Owner: $⬇ generic price slash toggle
+  const slashGenBtn = $sheetBody.querySelector('#b-slash-gen');
+  if (slashGenBtn) {
+    slashGenBtn.addEventListener('click', async () => {
+      const ps = s.priceSlash || {};
+      const hasGen = ps.generic && ps.generic.active;
+      const newSlash = Object.assign({}, ps, {
+        generic: hasGen ? null : { active: true, ts: Date.now() }
+      });
+      const ok = await window.PublicStops.setPriceSlash(s.publicId, newSlash);
+      if (ok) toast(hasGen ? 'Cleared $⬇ reduced.' : '$⬇ Prices reduced — broadcast!');
+    });
+  }
+
+  // Owner: ⚡ specific items composer
+  const slashItemsBtn = $sheetBody.querySelector('#b-slash-items');
+  if (slashItemsBtn) {
+    slashItemsBtn.addEventListener('click', () => {
+      openSlashItemsEditor(s);
+    });
+  }
+  const slashItemsClearBtn = $sheetBody.querySelector('#b-slash-items-clear');
+  if (slashItemsClearBtn) {
+    slashItemsClearBtn.addEventListener('click', async () => {
+      const ps = s.priceSlash || {};
+      const newSlash = Object.assign({}, ps, { items: null });
+      const ok = await window.PublicStops.setPriceSlash(s.publicId, newSlash);
+      if (ok) toast('Cleared ⚡ lightning deals.');
     });
   }
 
@@ -959,25 +1298,26 @@ function wireSheet(s) {
     });
   }
 
-  // Photo input
+  // Photo input (always available — photos are local)
   const $photoInput = $sheetBody.querySelector('#f-photo');
-  $photoInput.addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    try {
-      toast('Compressing photo…');
-      const dataUrl = await compressImage(file);
-      s.photos.push(dataUrl);
-      s.updatedAt = Date.now();
-      save();
-      // Re-render sheet to show new thumb
-      $sheetBody.innerHTML = renderSheet(s);
-      wireSheet(s);
-      renderList();
-    } catch (err) {
-      toast('Photo failed: ' + err.message);
-    }
-  });
+  if ($photoInput) {
+    $photoInput.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      try {
+        toast('Compressing photo…');
+        const dataUrl = await compressImage(file);
+        s.photos.push(dataUrl);
+        s.updatedAt = Date.now();
+        save();
+        $sheetBody.innerHTML = renderSheet(s);
+        wireSheet(s);
+        renderList();
+      } catch (err) {
+        toast('Photo failed: ' + err.message);
+      }
+    });
+  }
 
   // Photo thumbs → lightbox
   $sheetBody.querySelectorAll('[data-photo-idx]').forEach(el => {
@@ -1046,12 +1386,29 @@ document.getElementById('lb-delete').addEventListener('click', () => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────
-// Filter chips, search, sort, panel toggles
+// Filter dropdown, search, sort, panel toggles
 // ──────────────────────────────────────────────────────────────────────────
-document.querySelectorAll('.chip').forEach(chip => {
-  chip.addEventListener('click', () => {
-    document.querySelectorAll('.chip').forEach(c => c.classList.toggle('active', c === chip));
-    activeFilter = chip.dataset.filter;
+const FILTER_LABELS = { all: 'All', unvisited: 'Unvisited', visited: 'Visited', revisit: 'Revisit', must: 'Must visit' };
+const $filterBtn = document.getElementById('filter-btn');
+const $filterMenu = document.getElementById('filter-menu');
+const $filterCurrentLabel = document.getElementById('filter-current-label');
+
+$filterBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  $filterMenu.classList.toggle('open');
+});
+document.addEventListener('click', (e) => {
+  if (!$filterMenu.contains(e.target) && e.target !== $filterBtn) {
+    $filterMenu.classList.remove('open');
+  }
+});
+$filterMenu.querySelectorAll('button[data-filter]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    $filterMenu.querySelectorAll('button').forEach(b => b.classList.toggle('active', b === btn));
+    activeFilter = btn.dataset.filter;
+    $filterCurrentLabel.textContent = FILTER_LABELS[activeFilter] || 'All';
+    $filterMenu.classList.remove('open');
+    refreshAllMarkers();
     renderList();
   });
 });
@@ -1059,6 +1416,14 @@ document.querySelectorAll('.chip').forEach(chip => {
 let searchT;
 $search.addEventListener('input', () => {
   clearTimeout(searchT); searchT = setTimeout(renderList, 120);
+});
+
+// Phase 5: Send/blur — submitting the search form (Enter key, or 🔍 button) commits + dismisses keyboard
+document.getElementById('search-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  clearTimeout(searchT);
+  renderList();
+  $search.blur();
 });
 
 document.getElementById('sort-btn').addEventListener('click', () => {
@@ -1189,7 +1554,7 @@ function openAddSheet({ lat = null, lon = null, prefilledAddr = '', defaultStatu
     <label>Address</label>
     <input type="text" id="n-addr" placeholder="123 Main St" value="${escapeHtml(prefilledAddr)}">
     <label>Area (optional)</label>
-    <input type="text" id="n-area" placeholder="Belgium">
+    <input type="text" id="n-area" placeholder="Fredonia">
     <label>Note</label>
     <textarea id="n-note" placeholder="Why noteworthy?"></textarea>
     <label>Status</label>
@@ -1201,9 +1566,9 @@ function openAddSheet({ lat = null, lon = null, prefilledAddr = '', defaultStatu
     </div>
     <div class="sheet-actions">
       <button class="btn-primary" id="n-save">Save</button>
-      <button class="btn-share" id="n-save-public" title="Save and share with all Rummager users">Save & Share Public</button>
       <button class="btn-close" id="n-close">Cancel</button>
     </div>
+    <div style="margin-top:8px;font-size:0.78rem;color:var(--c-muted);">This stop is private to you. To publish a sale that everyone in town can see, use <b>+ → Publish a public sale</b>.</div>
     ${lat != null ? `<div style="margin-top:10px; font-size:0.78rem; color:var(--c-muted)">📍 Using GPS coords ${lat.toFixed(5)}, ${lon.toFixed(5)}</div>` : ''}
   `;
   $sheetBg.classList.add('open');
@@ -1248,81 +1613,39 @@ function openAddSheet({ lat = null, lon = null, prefilledAddr = '', defaultStatu
   }
 
   const saveBtn = $sheetBody.querySelector('#n-save');
-  const sharePublicBtn = $sheetBody.querySelector('#n-save-public');
   let submitting = false;
-  function lockButtons() {
-    submitting = true;
-    if (saveBtn) saveBtn.disabled = true;
-    if (sharePublicBtn) sharePublicBtn.disabled = true;
-  }
-  function unlockButtons() {
-    submitting = false;
-    if (saveBtn) saveBtn.disabled = false;
-    if (sharePublicBtn) sharePublicBtn.disabled = false;
-  }
 
   saveBtn.addEventListener('click', async () => {
     if (submitting) return;
-    lockButtons();
+    submitting = true;
+    saveBtn.disabled = true;
     try {
       const stop = await buildAndCommitStop();
       if (stop) { closeSheet(); toast('Stop added.'); }
-      else { unlockButtons(); }
-    } catch (e) { unlockButtons(); throw e; }
+      else { submitting = false; saveBtn.disabled = false; }
+    } catch (e) { submitting = false; saveBtn.disabled = false; throw e; }
   });
-
-  if (sharePublicBtn) {
-    sharePublicBtn.addEventListener('click', async () => {
-      if (submitting) return;
-      if (!window.PublicStops || !window.PublicStops.isConfigured()) {
-        toast('Public sharing not configured.');
-        return;
-      }
-      lockButtons();
-      try {
-        const stop = await buildAndCommitStop();
-        if (!stop) { unlockButtons(); return; }
-        if (stop.lat == null) { toast('Need coordinates to share publicly.'); closeSheet(); return; }
-        toast('Sharing publicly…');
-        const ok = await window.PublicStops.share(stop);
-        closeSheet();
-        toast(ok ? 'Shared! Visible to all Rummager users.' : 'Public share failed.');
-      } catch (e) { unlockButtons(); throw e; }
-    });
-  }
 }
 
-document.getElementById('btn-add-manual').addEventListener('click', () => openAddSheet());
+document.getElementById('btn-add-manual').addEventListener('click', () => openFabMenu());
 
 // ──────────────────────────────────────────────────────────────────────────
-// FAB — GPS quick-add
+// FAB — opens the + menu (publish public sale / add private / GPS quick-add)
 // ──────────────────────────────────────────────────────────────────────────
 const $fab = document.getElementById('fab');
-$fab.addEventListener('click', async () => {
-  if (!navigator.geolocation) { toast('Geolocation not supported.'); return; }
-  $fab.classList.add('busy');
-  toast('Getting GPS fix…');
-  navigator.geolocation.getCurrentPosition(
-    async (pos) => {
-      const lat = pos.coords.latitude, lon = pos.coords.longitude;
-      lastKnownPos = { lat, lon };
-      startWatching();
-      // Reverse-geocode for prefill
-      const guess = await reverseGeocode(lat, lon);
-      $fab.classList.remove('busy');
-      openAddSheet({ lat, lon, prefilledAddr: guess, defaultStatus: 'visited' });
-    },
-    (err) => {
-      $fab.classList.remove('busy');
-      toast('GPS error: ' + err.message);
-    },
-    { enableHighAccuracy: true, timeout: 20000 }
-  );
+$fab.addEventListener('click', () => {
+  if ($fabMenu && $fabMenu.classList.contains('open')) closeFabMenu();
+  else if (typeof openFabMenu === 'function') openFabMenu();
 });
 
-// Long-press map to drop a pin manually (helps when geocode fails)
+// Long-press map to drop a private pin manually (helps when geocode fails)
 let pressTimer = null;
 map.on('contextmenu', (e) => {
+  // If pin-verify is active, treat long-press as a relocate of the verify pin
+  if ($pinverify && $pinverify.classList.contains('open')) {
+    map.setView([e.latlng.lat, e.latlng.lng], map.getZoom());
+    return;
+  }
   openAddSheet({ lat: e.latlng.lat, lon: e.latlng.lng, defaultStatus: 'unvisited' });
 });
 
@@ -1715,37 +2038,26 @@ function handleGroupDeepLink() {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// Public Stops (community-submitted addresses, visible to everyone)
+// Public Sales — Firebase /publicStops backed.
 // ──────────────────────────────────────────────────────────────────────────
-// Reuses the same FIREBASE_CONFIG + anonymous auth as the Group module.
-// Path: /publicStops/{stopId}. Per-stop ownership enforced by security rules.
-const PUBLIC_DISMISSED_KEY = 'rummager.publicDismissed'; // set of public stop IDs the local user has acted on (saved/flagged/ignored)
+// Reconciler model: every remote sale auto-merges into state.stops as a
+// regular pin (matched by publicId). Removed remote entries are silently
+// removed from the local list. priceSlash updates flow through in real time.
 const FLAG_THRESHOLD = 3;
-const PUBLIC_BBOX = { minLat: 42.5, maxLat: 47.5, minLon: -93.0, maxLon: -86.0 };
+const PUBLIC_BBOX = { minLat: 43.30, maxLat: 43.65, minLon: -88.10, maxLon: -87.65 };
+const NEW_BADGE_MS = 24 * 60 * 60 * 1000; // 24h
 const ADMIN_PASSWORD_HASH = '8693efe3dabb908510e92e55631d504e4b453f635aac6829ba85250dcad4fb6e';
 
 window.PublicStops = (() => {
   let fb = null, db = null, auth = null, ready = false;
   let unsub = null;
-  let cache = {}; // id -> serverObj
-  let markers = {}; // id -> Leaflet marker
-  let dismissed = loadDismissed();
-
-  function loadDismissed() {
-    try { return new Set(JSON.parse(localStorage.getItem(PUBLIC_DISMISSED_KEY) || '[]')); }
-    catch (e) { return new Set(); }
-  }
-  function saveDismissed() {
-    try { localStorage.setItem(PUBLIC_DISMISSED_KEY, JSON.stringify([...dismissed])); } catch (e) {}
-  }
-  function dismiss(id) { dismissed.add(id); saveDismissed(); refreshMarker(id); }
+  let cache = {}; // publicId -> serverObj
 
   function isConfigured() { return !!FIREBASE_CONFIG; }
 
   async function init() {
     if (ready) return true;
     if (!isConfigured()) return false;
-    // Piggyback on Group's initialization
     if (!window.Group || !await window.Group.initFirebase()) return false;
     fb = window.__firebase;
     auth = fb.getAuth();
@@ -1760,25 +2072,8 @@ window.PublicStops = (() => {
     const r = fb.ref(db, 'publicStops');
     unsub = fb.onValue(r, (snap) => {
       const next = snap.val() || {};
-      // Diff: remove markers for deleted ids
-      Object.keys(cache).forEach(id => { if (!next[id]) removeMarker(id); });
+      reconcile(next);
       cache = next;
-      Object.entries(cache).forEach(([id, obj]) => upsertMarker(id, obj));
-    });
-  }
-
-  function publicIcon(isNew) {
-    return L.divIcon({
-      className: 'public-marker-wrap',
-      html: `<div style="position:relative;width:28px;height:42px;">
-        <svg width="28" height="42" viewBox="0 0 28 42" xmlns="http://www.w3.org/2000/svg">
-          <path d="M14 0C6.3 0 0 6.3 0 14c0 10.5 14 28 14 28s14-17.5 14-28C28 6.3 21.7 0 14 0z" fill="#8e44ad" stroke="#f1c40f" stroke-width="2"/>
-          <circle cx="14" cy="14" r="6" fill="#fff"/>
-          <text x="14" y="17.5" text-anchor="middle" font-size="10" font-weight="bold" fill="#8e44ad">+</text>
-        </svg>
-        ${isNew ? '<span class="new-badge">NEW</span>' : ''}
-      </div>`,
-      iconSize: [28, 42], iconAnchor: [14, 42], popupAnchor: [0, -38],
     });
   }
 
@@ -1786,80 +2081,163 @@ window.PublicStops = (() => {
     if (!obj || obj.lat == null || obj.lon == null) return false;
     if ((obj.flags || 0) >= FLAG_THRESHOLD) return false;
     if (obj.expiresAt && obj.expiresAt < Date.now()) return false;
-    // Don't show your own public pin — you already have it in your local list as a regular pin.
-    const me = auth && auth.currentUser ? auth.currentUser.uid : null;
-    if (me && obj.createdBy === me) return false;
     return true;
   }
 
-  function upsertMarker(id, obj) {
-    if (!shouldShow(obj)) { removeMarker(id); return; }
-    const isNew = !dismissed.has(id);
-    let m = markers[id];
-    if (!m) {
-      m = L.marker([obj.lat, obj.lon], { icon: publicIcon(isNew), zIndexOffset: 7000 }).addTo(map);
-      m.on('click', () => openPublicStopSheet(id));
-      markers[id] = m;
-    } else {
-      m.setLatLng([obj.lat, obj.lon]);
-      m.setIcon(publicIcon(isNew));
-    }
+  function sanitizeFromRemote(pid, obj) {
+    return {
+      addr: obj.addr || '',
+      area: obj.area || 'Fredonia',
+      name: obj.name || '',
+      sellerName: obj.sellerName || '',
+      items: obj.items || obj.note || '',
+      lat: obj.lat,
+      lon: obj.lon,
+      pinVerified: !!obj.pinVerified,
+      hours: Array.isArray(obj.hours) ? obj.hours : [],
+      priceSlash: obj.priceSlash || null,
+      source: 'public',
+      createdByName: obj.createdByName || obj.sellerName || 'Anonymous',
+      createdBy: obj.createdBy || null,
+      remoteCreatedAt: obj.createdAt || Date.now(),
+      expiresAt: obj.expiresAt || null,
+    };
   }
 
-  function removeMarker(id) {
-    if (markers[id]) { map.removeLayer(markers[id]); delete markers[id]; }
+  // Merge remote publicStops into state.stops. Uses publicId for matching.
+  function reconcile(next) {
+    const now = Date.now();
+    const remoteIds = new Set();
+    Object.entries(next).forEach(([pid, obj]) => {
+      if (!shouldShow(obj)) return;
+      remoteIds.add(pid);
+      const existing = state.stops.find(s => s.publicId === pid);
+      const sallow = sanitizeFromRemote(pid, obj);
+      if (existing) {
+        // Preserve user-local fields: status, note, photos
+        const preserved = {
+          status: existing.status,
+          note: existing.note,
+          photos: existing.photos,
+          createdAt: existing.createdAt,
+        };
+        Object.assign(existing, sallow, preserved, { updatedAt: now });
+        ensureMarker(existing);
+      } else {
+        const newStop = Object.assign({
+          id: 'pub:' + pid,
+          publicId: pid,
+          status: 'unvisited',
+          note: '',
+          photos: [],
+          createdAt: now,
+          updatedAt: now,
+        }, sallow);
+        state.stops.push(newStop);
+        if (!state.newAcks[pid]) state.newAcks[pid] = now;
+        ensureMarker(newStop);
+      }
+    });
+    // Remove locals whose remote disappeared
+    const toRemove = state.stops.filter(s => s.publicId && !remoteIds.has(s.publicId));
+    toRemove.forEach(s => {
+      removeMarker(s.id);
+      state.stops = state.stops.filter(x => x.id !== s.id);
+      delete state.newAcks[s.publicId];
+      if (state.mySaleId === s.publicId) state.mySaleId = null;
+    });
+    save();
+    renderList();
   }
 
-  function refreshMarker(id) {
-    if (cache[id]) upsertMarker(id, cache[id]);
+  function isNew(stop) {
+    if (!stop.publicId) return false;
+    if (state.mySaleId === stop.publicId) return false;
+    const ackAt = state.newAcks[stop.publicId];
+    if (!ackAt) return true;
+    return (Date.now() - ackAt) < NEW_BADGE_MS;
   }
 
-  async function share(stop) {
-    if (!await init()) return false;
-    if (stop.lat < PUBLIC_BBOX.minLat || stop.lat > PUBLIC_BBOX.maxLat ||
-        stop.lon < PUBLIC_BBOX.minLon || stop.lon > PUBLIC_BBOX.maxLon) {
-      toast('Coordinates outside allowed area; not shared.');
-      return false;
+  function ackNew(publicId) {
+    if (!publicId) return;
+    state.newAcks[publicId] = Date.now() - NEW_BADGE_MS - 1; // mark stale
+    save();
+    const s = state.stops.find(x => x.publicId === publicId);
+    if (s) ensureMarker(s);
+    renderList();
+  }
+
+  function bboxOk(lat, lon) {
+    return lat >= PUBLIC_BBOX.minLat && lat <= PUBLIC_BBOX.maxLat &&
+           lon >= PUBLIC_BBOX.minLon && lon <= PUBLIC_BBOX.maxLon;
+  }
+
+  // Publish a brand-new public sale. Returns the publicId or null.
+  async function publish(payload) {
+    if (!await init()) { toast('Sharing not configured.'); return null; }
+    if (!bboxOk(payload.lat, payload.lon)) {
+      toast('Pin must be within the Fredonia / Ozaukee area.');
+      return null;
     }
     const me = auth.currentUser;
-    if (!me) return false;
+    if (!me) { toast('Not signed in.'); return null; }
     const id = 'pub-' + Math.random().toString(36).slice(2, 12);
     const now = Date.now();
-    const payload = {
-      addr: (stop.addr || '').slice(0, 200),
-      area: (stop.area || '').slice(0, 80),
-      note: (stop.note || '').slice(0, 500),
-      lat: stop.lat, lon: stop.lon,
-      status: stop.status || 'unvisited',
+    const fullPayload = Object.assign({
+      addr: '', name: '', sellerName: '', items: '', area: 'Fredonia',
+      hours: [], pinVerified: false, priceSlash: null,
+    }, payload, {
       createdBy: me.uid,
-      createdByName: (window.Group && window.Group.pref.name) || 'Anonymous',
+      createdByName: payload.sellerName || (window.Group && window.Group.pref.name) || 'Anonymous',
       createdAt: now,
       updatedAt: now,
-      expiresAt: now + 7 * 24 * 60 * 60 * 1000, // 7 days
+      expiresAt: now + 7 * 24 * 60 * 60 * 1000,
       flags: 0,
-    };
+    });
     try {
-      await fb.set(fb.ref(db, `publicStops/${id}`), payload);
-      dismiss(id); // we know about it; don't show NEW to ourselves
-      return true;
-    } catch (e) { console.error('public share failed', e); return false; }
+      await fb.set(fb.ref(db, `publicStops/${id}`), fullPayload);
+      state.mySaleId = id;
+      state.newAcks[id] = Date.now() - NEW_BADGE_MS - 1; // pre-ack ourselves
+      save();
+      if (window.Stats) window.Stats.bumpEvent('publishes');
+      return id;
+    } catch (e) { console.error('publish failed', e); toast('Publish failed.'); return null; }
   }
 
-  async function flag(id) {
+  // Update an existing public sale (owner only on server). Pass partial fields.
+  async function update(publicId, partial) {
     if (!await init()) return false;
-    const obj = cache[id]; if (!obj) return false;
+    try {
+      await fb.update(fb.ref(db, `publicStops/${publicId}`), Object.assign({ updatedAt: Date.now() }, partial));
+      return true;
+    } catch (e) { console.error('update failed', e); toast('Update failed.'); return false; }
+  }
+
+  async function setPriceSlash(publicId, slash) {
+    const ok = await update(publicId, { priceSlash: slash });
+    if (ok && window.Stats && slash && ((slash.generic && slash.generic.active) || (slash.items && slash.items.active))) {
+      window.Stats.bumpEvent('slashes');
+    }
+    return ok;
+  }
+
+  async function flag(publicId) {
+    if (!await init()) return false;
+    const obj = cache[publicId]; if (!obj) return false;
     const newCount = (obj.flags || 0) + 1;
     try {
-      await fb.update(fb.ref(db, `publicStops/${id}`), { flags: newCount });
-      dismiss(id);
+      await fb.update(fb.ref(db, `publicStops/${publicId}`), { flags: newCount });
       return true;
     } catch (e) { console.error('flag failed', e); return false; }
   }
 
-  async function deleteOne(id) {
+  async function deleteOne(publicId) {
     if (!await init()) return false;
-    try { await fb.remove(fb.ref(db, `publicStops/${id}`)); return true; }
-    catch (e) { console.error('delete failed', e); return false; }
+    try {
+      await fb.remove(fb.ref(db, `publicStops/${publicId}`));
+      if (state.mySaleId === publicId) { state.mySaleId = null; save(); }
+      return true;
+    } catch (e) { console.error('delete failed', e); return false; }
   }
 
   async function wipeAll() {
@@ -1868,89 +2246,119 @@ window.PublicStops = (() => {
     catch (e) { console.error('wipe failed', e); return false; }
   }
 
-  function get(id) { return cache[id]; }
-  function isDismissed(id) { return dismissed.has(id); }
+  function get(publicId) { return cache[publicId]; }
   function myUid() { return auth && auth.currentUser ? auth.currentUser.uid : null; }
+  function count() { return Object.keys(cache).length; }
 
-  return { init, isConfigured, share, flag, deleteOne, wipeAll, get, dismiss, isDismissed, myUid };
+  return { init, isConfigured, publish, update, setPriceSlash, flag, deleteOne, wipeAll,
+           get, isNew, ackNew, myUid, count, bboxOk };
 })();
+// (Old "Save/Flag/Ignore" public-stop sheet removed — public sales are now
+//  auto-merged into the local list and use the regular detail sheet.)
 
-// ── Public stop bottom sheet ──────────────────────────────────────────────
-function openPublicStopSheet(id) {
-  const obj = window.PublicStops.get(id);
-  if (!obj) return;
-  openSheetId = '__public:' + id;
-  const myUid = window.PublicStops.myUid();
-  const isMine = myUid && obj.createdBy === myUid;
-  const ageStr = (() => {
-    const s = Math.round((Date.now() - obj.createdAt) / 1000);
-    if (s < 60) return `${s}s ago`;
-    if (s < 3600) return `${Math.round(s/60)}m ago`;
-    if (s < 86400) return `${Math.round(s/3600)}h ago`;
-    return `${Math.round(s/86400)}d ago`;
-  })();
-  $sheetBody.innerHTML = `
-    <h2>📍 ${escapeHtml(obj.addr)}</h2>
-    <div class="public-meta">
-      Shared by <b>${escapeHtml(obj.createdByName || 'Anonymous')}</b> · ${ageStr}
-      ${obj.flags ? ` · <span class="flag-count">🚩 ${obj.flags}</span>` : ''}
-    </div>
-    ${obj.area ? `<label>Area</label><div>${escapeHtml(obj.area)}</div>` : ''}
-    ${obj.note ? `<label>Note</label><div style="white-space:pre-wrap;">${escapeHtml(obj.note)}</div>` : ''}
-    <div class="sheet-actions">
-      <button class="btn-primary" id="ps-save">💾 Save to my list</button>
-      <button class="btn-danger" id="ps-flag">🚩 Flag</button>
-      <button class="btn-secondary" id="ps-ignore">Ignore</button>
-      ${isMine ? `<button class="btn-danger" id="ps-delete">Delete (mine)</button>` : ''}
-      <button class="btn-close" id="ps-close">Close</button>
-    </div>
-  `;
-  $sheetBg.classList.add('open');
-  $sheet.classList.add('open');
+// ──────────────────────────────────────────────────────────────────────────
+// Usage stats — anonymous, opt-in by virtue of using the app.
+//   Writes to /publicStats/{totals,daily,online} in Firebase RTDB.
+//   Counters use atomic increment(); presence uses onDisconnect().remove().
+// ──────────────────────────────────────────────────────────────────────────
+window.Stats = (() => {
+  let fb = null, db = null, auth = null, ready = false;
+  let onlineRef = null, refresher = null;
 
-  // Pan map
-  if (obj.lat != null) map.setView([obj.lat, obj.lon], Math.max(map.getZoom(), 16));
-
-  $sheetBody.querySelector('#ps-close').addEventListener('click', closeSheet);
-  $sheetBody.querySelector('#ps-ignore').addEventListener('click', () => {
-    window.PublicStops.dismiss(id);
-    closeSheet();
-    toast('Hidden the NEW badge.');
-  });
-  $sheetBody.querySelector('#ps-save').addEventListener('click', () => {
-    const now = Date.now();
-    const stop = {
-      id: uid(),
-      addr: obj.addr, area: obj.area || '', items: '',
-      lat: obj.lat, lon: obj.lon,
-      source: 'manual',
-      status: 'unvisited',
-      note: (obj.note ? `(from public, by ${obj.createdByName}): ${obj.note}` : `(from public, by ${obj.createdByName})`),
-      photos: [],
-      createdAt: now, updatedAt: now,
-    };
-    state.stops.push(stop);
-    save(); ensureMarker(stop); renderList();
-    window.PublicStops.dismiss(id);
-    closeSheet();
-    toast('Saved to your list.');
-  });
-  $sheetBody.querySelector('#ps-flag').addEventListener('click', async () => {
-    if (!confirm('Flag this stop as inappropriate or spam?')) return;
-    const ok = await window.PublicStops.flag(id);
-    closeSheet();
-    toast(ok ? 'Flagged. Thanks.' : 'Flag failed.');
-  });
-  const delBtn = $sheetBody.querySelector('#ps-delete');
-  if (delBtn) {
-    delBtn.addEventListener('click', async () => {
-      if (!confirm('Delete this public stop? (only you can do this — you posted it)')) return;
-      const ok = await window.PublicStops.deleteOne(id);
-      closeSheet();
-      toast(ok ? 'Deleted.' : 'Delete failed.');
-    });
+  function todayKey() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   }
-}
+
+  async function init() {
+    if (ready) return true;
+    if (!window.__firebase) {
+      await new Promise(r => window.addEventListener('firebase-ready', r, { once: true }));
+    }
+    fb = window.__firebase;
+    try {
+      // Reuse default app (PublicStops already initialized it)
+      db = fb.getDatabase();
+      auth = fb.getAuth();
+      if (!auth.currentUser) {
+        await new Promise(r => fb.onAuthStateChanged(auth, u => { if (u) r(); }));
+      }
+      ready = true;
+      // Boot-time bumps
+      await bumpEvent('visits');
+      await markOnline();
+      // Refresh presence every 60s so stale entries get cleaned up if onDisconnect misses
+      refresher = setInterval(() => { markOnline().catch(() => {}); }, 60_000);
+      return true;
+    } catch (e) { console.warn('Stats init failed', e); return false; }
+  }
+
+  async function bumpEvent(name) {
+    if (!ready && !await init()) return false;
+    try {
+      const today = todayKey();
+      const uid = auth.currentUser.uid;
+      const updates = {};
+      updates[`publicStats/totals/${name}`] = fb.increment(1);
+      updates[`publicStats/daily/${today}/${name}`] = fb.increment(1);
+      if (name === 'visits') {
+        // Track unique daily users
+        updates[`publicStats/daily/${today}/uniques/${uid}`] = true;
+      }
+      await fb.update(fb.ref(db), updates);
+      return true;
+    } catch (e) { console.warn('bumpEvent failed', name, e); return false; }
+  }
+
+  async function markOnline() {
+    if (!ready) return;
+    const uid = auth.currentUser.uid;
+    onlineRef = fb.ref(db, `publicStats/online/${uid}`);
+    try {
+      await fb.set(onlineRef, fb.serverTimestamp());
+      await fb.onDisconnect(onlineRef).remove();
+    } catch (e) { /* presence is best-effort */ }
+  }
+
+  // Returns { totals, today, online, last7 }
+  async function getSummary() {
+    if (!ready && !await init()) return null;
+    const today = todayKey();
+    try {
+      const snap = await fb.get(fb.ref(db, 'publicStats'));
+      const data = snap.exists() ? snap.val() : {};
+      const totals = data.totals || {};
+      const daily = data.daily || {};
+      const onlineMap = data.online || {};
+      const todayData = daily[today] || {};
+      const todayUniques = Object.keys(todayData.uniques || {}).length;
+
+      // Online: anyone whose timestamp is within last 5 minutes
+      const cutoff = Date.now() - 5 * 60 * 1000;
+      const online = Object.values(onlineMap).filter(ts => typeof ts === 'number' && ts > cutoff).length;
+
+      // Last 7 days
+      const last7 = [];
+      const d0 = new Date();
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(d0); d.setDate(d0.getDate() - i);
+        const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        const row = daily[k] || {};
+        last7.push({
+          date: k,
+          visits: row.visits || 0,
+          uniques: Object.keys(row.uniques || {}).length,
+          publishes: row.publishes || 0,
+          slashes: row.slashes || 0,
+          routes: row.routes || 0,
+        });
+      }
+      return { totals, today: todayData, todayUniques, online, last7 };
+    } catch (e) { console.warn('Stats.getSummary failed', e); return null; }
+  }
+
+  return { init, bumpEvent, getSummary };
+})();
 
 // ── Admin: tap header title 7 times within 5s → password → wipe ───────────
 async function sha256Hex(str) {
@@ -1986,9 +2394,13 @@ function openAdminSheet() {
       Your auth UID: <code style="font-size:0.78rem;word-break:break-all;">${escapeHtml(uidStr)}</code><br>
       Add this UID under <code>/admins/&lt;uid&gt; = true</code> in Firebase to enable cross-user moderation in security rules.
     </div>
-    <label>Public stops (current count: ${Object.keys(window.PublicStops_cacheView()).length})</label>
+    <label>Public sales (current count: ${window.PublicStops.count()})</label>
     <div class="sheet-actions">
       <button class="btn-danger" id="adm-wipe">💣 Wipe ALL public stops</button>
+    </div>
+    <label>📊 Usage stats</label>
+    <div id="adm-stats" style="font-size:0.85rem;line-height:1.5;">Loading…</div>
+    <div class="sheet-actions" style="margin-top:14px;">
       <button class="btn-close" id="adm-close">Close</button>
     </div>
   `;
@@ -2001,21 +2413,35 @@ function openAdminSheet() {
     closeSheet();
     toast(ok ? 'All public stops wiped.' : 'Wipe failed (check that your UID is in /admins).');
   });
+  // Render stats async
+  (async () => {
+    const s = await window.Stats.getSummary();
+    const el = $sheetBody.querySelector('#adm-stats');
+    if (!s || !el) { if (el) el.textContent = '(unavailable)'; return; }
+    const t = s.totals || {};
+    const today = s.today || {};
+    el.innerHTML = `
+      <div><b>Totals:</b> ${t.visits || 0} visits, ${t.publishes || 0} sales published, ${t.slashes || 0} reductions, ${t.routes || 0} routes built</div>
+      <div><b>Today:</b> ${today.visits || 0} visits / ${s.todayUniques} unique users</div>
+      <div><b>Online now:</b> ${s.online}</div>
+      <div style="margin-top:6px;"><b>Last 7 days:</b></div>
+      <table style="width:100%;border-collapse:collapse;font-size:0.78rem;margin-top:4px;">
+        <thead><tr style="background:#f0f0f0;"><th style="text-align:left;padding:3px 4px;">Date</th><th style="padding:3px 4px;">Visits</th><th style="padding:3px 4px;">Uniques</th><th style="padding:3px 4px;">Pub</th><th style="padding:3px 4px;">$⬇</th><th style="padding:3px 4px;">Routes</th></tr></thead>
+        <tbody>
+          ${s.last7.map(r => `<tr style="border-bottom:1px solid #eee;"><td style="padding:3px 4px;">${r.date.slice(5)}</td><td style="text-align:center;padding:3px 4px;">${r.visits}</td><td style="text-align:center;padding:3px 4px;">${r.uniques}</td><td style="text-align:center;padding:3px 4px;">${r.publishes}</td><td style="text-align:center;padding:3px 4px;">${r.slashes}</td><td style="text-align:center;padding:3px 4px;">${r.routes}</td></tr>`).join('')}
+        </tbody>
+      </table>
+    `;
+  })();
 }
-// Helper to read cache from inside admin sheet without exposing internals
-window.PublicStops_cacheView = () => {
-  // Lazy: re-derive from markers (good enough for a count)
-  const out = {};
-  document.querySelectorAll('.public-marker-wrap').forEach((_, i) => out[i] = 1);
-  return out;
-};
+// (PublicStops_cacheView helper removed — admin sheet now uses PublicStops.count().)
 
 // ──────────────────────────────────────────────────────────────────────────
 // Route through all Must Visit stops
 //   1. Try OSRM /trip — returns optimal order + road-following polyline
 //   2. Fall back to greedy nearest-neighbor + 2-opt + straight lines on failure
 // ──────────────────────────────────────────────────────────────────────────
-const BELGIUM_DEFAULT = { lat: 43.4997, lon: -87.8504 };
+// (FREDONIA_DEFAULT defined earlier alongside map setup.)
 const OSRM_BASE = 'https://router.project-osrm.org';
 let routeLayer = null;
 let routeNumberMarkers = [];
@@ -2118,7 +2544,7 @@ async function buildAndShowRoute() {
   }
   const start = lastKnownPos
     ? { lat: lastKnownPos.lat, lon: lastKnownPos.lon, label: 'Me' }
-    : { lat: BELGIUM_DEFAULT.lat, lon: BELGIUM_DEFAULT.lon, label: 'Belgium WI' };
+    : { lat: FREDONIA_DEFAULT.lat, lon: FREDONIA_DEFAULT.lon, label: 'Fredonia WI' };
 
   // Cache key = start (rounded) + sorted must-visit ids
   const cacheKey = `${start.lat.toFixed(4)},${start.lon.toFixed(4)}|` +
@@ -2194,7 +2620,7 @@ function showRouteSummary(start, ordered, totalMi, etaMin, mode) {
       ${truncated ? `<br><b style="color:#c0392b">Note:</b> Google Maps caps at 10 stops; opening will show first 9. Full route is on the Rummager map.` : ''}
     </div>
     <ol style="padding-left: 20px; margin: 8px 0;">
-      ${ordered.map(s => `<li style="margin: 4px 0;">${escapeHtml(s.addr)}${s.area && s.area !== 'Belgium' ? ` <span style="color:var(--c-muted);font-size:0.78rem;">(${escapeHtml(s.area)})</span>` : ''}</li>`).join('')}
+      ${ordered.map(s => `<li style="margin: 4px 0;">${escapeHtml(s.addr)}${s.area && s.area !== 'Fredonia' ? ` <span style="color:var(--c-muted);font-size:0.78rem;">(${escapeHtml(s.area)})</span>` : ''}</li>`).join('')}
     </ol>
     <div class="sheet-actions">
       <button class="btn-primary" id="r-gmaps">🧭 Open in Google Maps</button>
@@ -2213,13 +2639,439 @@ function showRouteSummary(start, ordered, totalMi, etaMin, mode) {
 
 document.getElementById('route-btn').addEventListener('click', () => {
   if (routeLayer) { clearRoute(); toast('Route cleared.'); return; }
+  if (window.Stats) window.Stats.bumpEvent('routes');
   buildAndShowRoute();
 });
+
+// ──────────────────────────────────────────────────────────────────────────
+// Hours & age helpers
+// ──────────────────────────────────────────────────────────────────────────
+function ageString(ts) {
+  if (!ts) return '';
+  const s = Math.round((Date.now() - ts) / 1000);
+  if (s < 60) return ` · ${s}s ago`;
+  if (s < 3600) return ` · ${Math.round(s/60)}m ago`;
+  if (s < 86400) return ` · ${Math.round(s/3600)}h ago`;
+  return ` · ${Math.round(s/86400)}d ago`;
+}
+
+function fmtTime12(hhmm) {
+  if (!hhmm) return '';
+  const [h, m] = hhmm.split(':').map(Number);
+  const am = h < 12;
+  const h12 = ((h + 11) % 12) + 1;
+  return `${h12}:${String(m).padStart(2, '0')}${am ? 'a' : 'p'}`;
+}
+
+function fmtDateShort(yyyymmdd) {
+  if (!yyyymmdd) return '';
+  const [y, m, d] = yyyymmdd.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  return dt.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+function todayStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+function nowHHMM() {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+
+// Returns { label, when } where label is one of: 'Open now', 'Opens at X', 'Closed', '—'
+function computeOpenStatus(hours) {
+  if (!Array.isArray(hours) || hours.length === 0) return { label: '—' };
+  const today = todayStr();
+  const now = nowHHMM();
+  const todayRow = hours.find(h => h.date === today);
+  if (todayRow && todayRow.open && todayRow.close) {
+    if (now >= todayRow.open && now <= todayRow.close) return { label: 'Open now', when: todayRow.close };
+    if (now < todayRow.open) return { label: `Opens at ${fmtTime12(todayRow.open)}` };
+  }
+  // Find next future opening
+  const future = hours
+    .filter(h => h.date > today || (h.date === today && h.open && h.open > now))
+    .sort((a, b) => (a.date + (a.open || '')).localeCompare(b.date + (b.open || '')));
+  if (future.length > 0) {
+    return { label: `${fmtDateShort(future[0].date)} ${fmtTime12(future[0].open)}` };
+  }
+  return { label: 'Closed' };
+}
+
+function renderHoursDisplay(hours) {
+  if (!Array.isArray(hours) || hours.length === 0) return '';
+  const status = computeOpenStatus(hours);
+  const pillCls = status.label === 'Open now' ? 'open' : status.label === 'Closed' ? 'closed' : 'soon';
+  const sorted = hours.slice().sort((a, b) => a.date.localeCompare(b.date));
+  return `
+    <label>Open hours <span class="open-pill ${pillCls}">${escapeHtml(status.label)}</span></label>
+    <div class="hours-display">
+      ${sorted.map(h => `<div class="day"><span class="d">${escapeHtml(fmtDateShort(h.date))}</span><span>${escapeHtml(fmtTime12(h.open))} – ${escapeHtml(fmtTime12(h.close))}</span></div>`).join('')}
+    </div>
+  `;
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// + FAB menu
+// ──────────────────────────────────────────────────────────────────────────
+const $fabMenu = document.getElementById('fab-menu');
+const $fabMenuBg = document.getElementById('fab-menu-bg');
+function openFabMenu() {
+  $fabMenu.classList.add('open');
+  $fabMenuBg.classList.add('open');
+}
+function closeFabMenu() {
+  $fabMenu.classList.remove('open');
+  $fabMenuBg.classList.remove('open');
+}
+$fabMenuBg.addEventListener('click', closeFabMenu);
+
+document.getElementById('menu-publish').addEventListener('click', () => {
+  closeFabMenu();
+  openPublishSaleSheet();
+});
+document.getElementById('menu-add-stop').addEventListener('click', () => {
+  closeFabMenu();
+  openAddSheet();
+});
+document.getElementById('menu-add-gps').addEventListener('click', () => {
+  closeFabMenu();
+  if (!navigator.geolocation) { toast('Geolocation not supported.'); return; }
+  $fab.classList.add('busy');
+  toast('Getting GPS fix…');
+  navigator.geolocation.getCurrentPosition(
+    async (pos) => {
+      const lat = pos.coords.latitude, lon = pos.coords.longitude;
+      lastKnownPos = { lat, lon };
+      startWatching();
+      const guess = await reverseGeocode(lat, lon);
+      $fab.classList.remove('busy');
+      openAddSheet({ lat, lon, prefilledAddr: guess, defaultStatus: 'visited' });
+    },
+    (err) => {
+      $fab.classList.remove('busy');
+      toast('GPS error: ' + err.message);
+    },
+    { enableHighAccuracy: true, timeout: 20000 }
+  );
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// Pin-verify mode
+//   Floating screen-center pin overlaid on the map. User pans the map under
+//   the pin, or long-presses to drop it elsewhere, then confirms.
+// ──────────────────────────────────────────────────────────────────────────
+const $pinverify = document.getElementById('pinverify');
+let pinVerifyResolve = null;
+
+function startPinVerify(initLat, initLon) {
+  return new Promise((resolve) => {
+    pinVerifyResolve = resolve;
+    if (initLat != null && initLon != null) {
+      map.setView([initLat, initLon], Math.max(map.getZoom(), 17));
+    }
+    // Hide the sheet temporarily so the map is fully visible
+    $sheet.classList.remove('open');
+    $sheetBg.classList.remove('open');
+    $pinverify.classList.add('open');
+  });
+}
+
+function endPinVerify(result) {
+  $pinverify.classList.remove('open');
+  // Re-open the sheet (its content is still in $sheetBody)
+  $sheetBg.classList.add('open');
+  $sheet.classList.add('open');
+  if (pinVerifyResolve) { pinVerifyResolve(result); pinVerifyResolve = null; }
+}
+
+document.getElementById('pv-confirm').addEventListener('click', () => {
+  const c = map.getCenter();
+  endPinVerify({ lat: c.lat, lon: c.lng });
+});
+document.getElementById('pv-cancel').addEventListener('click', () => endPinVerify(null));
+
+// ──────────────────────────────────────────────────────────────────────────
+// Publish a public sale (seller flow)
+// ──────────────────────────────────────────────────────────────────────────
+function openPublishSaleSheet({ editPublicId = null } = {}) {
+  openSheetId = '__publish';
+  const editing = !!editPublicId;
+  const existing = editing ? state.stops.find(s => s.publicId === editPublicId) : null;
+  if (editing && !existing) { toast('Sale not found.'); return; }
+
+  // Working draft (mutated in-place; final commit on Publish)
+  const draft = {
+    name: existing ? (existing.name || '') : '',
+    sellerName: existing ? (existing.sellerName || '') : (window.Group && window.Group.pref.name) || '',
+    items: existing ? (existing.items || '') : '',
+    addr: existing ? (existing.addr || '') : '',
+    area: existing ? (existing.area || 'Fredonia') : 'Fredonia',
+    lat: existing ? existing.lat : null,
+    lon: existing ? existing.lon : null,
+    pinVerified: existing ? !!existing.pinVerified : false,
+    hours: existing ? (existing.hours || []).slice() : [],
+  };
+
+  function render() {
+    $sheetBody.innerHTML = `
+      <h2>${editing ? '✏️ Edit my sale' : '🏷️ Publish a public sale'}</h2>
+      <div style="font-size:0.78rem;color:var(--c-muted);margin-bottom:6px;">Visible to everyone in town. Pin must be inside the Fredonia / Ozaukee area.</div>
+
+      <label>Sale name *</label>
+      <input type="text" id="ps-name" placeholder="e.g. Smith Family Garage Sale" maxlength="80" value="${escapeHtml(draft.name)}">
+
+      <label>Your name (optional)</label>
+      <input type="text" id="ps-seller" placeholder="e.g. Jane" maxlength="40" value="${escapeHtml(draft.sellerName)}">
+
+      <label>Items / description</label>
+      <textarea id="ps-items" placeholder="What's at the sale?">${escapeHtml(draft.items)}</textarea>
+
+      <label>Address *</label>
+      <input type="text" id="ps-addr" placeholder="123 Main St" value="${escapeHtml(draft.addr)}">
+
+      <div style="margin-top:6px;">
+        ${draft.lat != null
+          ? `<div style="font-size:0.82rem;color:var(--c-visited);">📍 Pin set: ${draft.lat.toFixed(5)}, ${draft.lon.toFixed(5)} ${draft.pinVerified ? '<b>(verified)</b>' : ''}</div>`
+          : `<div style="font-size:0.82rem;color:var(--c-muted);">No pin yet.</div>`}
+        <button class="btn-primary" id="ps-pin" style="margin-top:6px;width:100%;padding:10px;border-radius:6px;font-weight:600;">${draft.lat != null ? '🔁 Re-place / verify pin' : '📍 Geocode & verify pin'}</button>
+      </div>
+
+      <label>Open hours</label>
+      <div class="hours-editor" id="ps-hours-editor">
+        ${draft.hours.map((h, i) => hoursRowHtml(h, i)).join('')}
+        <button class="h-add" id="ps-hours-add">+ Add a day</button>
+      </div>
+
+      <div class="sheet-actions" style="margin-top:14px;">
+        <button class="btn-primary" id="ps-publish" style="background:#8e44ad;">${editing ? '💾 Save changes' : '🚀 Publish sale'}</button>
+        <button class="btn-close" id="ps-close">Cancel</button>
+      </div>
+    `;
+    wire();
+  }
+
+  function hoursRowHtml(h, i) {
+    return `<div class="h-row" data-h-idx="${i}">
+      <input type="date" data-h-field="date" value="${escapeHtml(h.date || '')}">
+      <input type="time" data-h-field="open" value="${escapeHtml(h.open || '')}">
+      <span style="font-size:0.85rem;">to</span>
+      <input type="time" data-h-field="close" value="${escapeHtml(h.close || '')}">
+      <button class="h-rm" data-h-rm="${i}">×</button>
+    </div>`;
+  }
+
+  function wire() {
+    $sheetBody.querySelector('#ps-close').addEventListener('click', closeSheet);
+
+    // Hours editor handlers
+    function rebindHours() {
+      $sheetBody.querySelectorAll('[data-h-idx]').forEach(row => {
+        const i = parseInt(row.dataset.hIdx, 10);
+        row.querySelectorAll('[data-h-field]').forEach(input => {
+          input.addEventListener('change', () => {
+            draft.hours[i][input.dataset.hField] = input.value;
+          });
+        });
+      });
+      $sheetBody.querySelectorAll('[data-h-rm]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const i = parseInt(btn.dataset.hRm, 10);
+          draft.hours.splice(i, 1);
+          render();
+        });
+      });
+    }
+    rebindHours();
+    $sheetBody.querySelector('#ps-hours-add').addEventListener('click', () => {
+      draft.hours.push({ date: todayStr(), open: '08:00', close: '17:00' });
+      render();
+    });
+
+    // Bind text fields → draft
+    $sheetBody.querySelector('#ps-name').addEventListener('input', e => draft.name = e.target.value);
+    $sheetBody.querySelector('#ps-seller').addEventListener('input', e => draft.sellerName = e.target.value);
+    $sheetBody.querySelector('#ps-items').addEventListener('input', e => draft.items = e.target.value);
+    $sheetBody.querySelector('#ps-addr').addEventListener('input', e => draft.addr = e.target.value);
+
+    // Pin geocode + verify
+    $sheetBody.querySelector('#ps-pin').addEventListener('click', async () => {
+      // Persist current text values into draft first
+      draft.name = $sheetBody.querySelector('#ps-name').value;
+      draft.sellerName = $sheetBody.querySelector('#ps-seller').value;
+      draft.items = $sheetBody.querySelector('#ps-items').value;
+      draft.addr = $sheetBody.querySelector('#ps-addr').value;
+      let initLat = draft.lat, initLon = draft.lon;
+      if (initLat == null && draft.addr.trim()) {
+        toast('Geocoding…');
+        const r = await geocodeAddress(draft.addr.trim(), draft.area);
+        if (r) { initLat = r.lat; initLon = r.lon; }
+        else toast('Could not geocode — drag the map to your location.');
+      }
+      if (initLat == null) {
+        // Center on Fredonia if no clue
+        initLat = FREDONIA_DEFAULT.lat;
+        initLon = FREDONIA_DEFAULT.lon;
+      }
+      const result = await startPinVerify(initLat, initLon);
+      if (result) {
+        if (!window.PublicStops.bboxOk(result.lat, result.lon)) {
+          toast('Pin must be in the Fredonia / Ozaukee area.');
+        } else {
+          draft.lat = result.lat; draft.lon = result.lon; draft.pinVerified = true;
+        }
+      }
+      render();
+    });
+
+    // Publish
+    $sheetBody.querySelector('#ps-publish').addEventListener('click', async () => {
+      // Final draft sync
+      draft.name = $sheetBody.querySelector('#ps-name').value.trim();
+      draft.sellerName = $sheetBody.querySelector('#ps-seller').value.trim();
+      draft.items = $sheetBody.querySelector('#ps-items').value;
+      draft.addr = $sheetBody.querySelector('#ps-addr').value.trim();
+
+      if (!draft.name) { toast('Sale name is required.'); return; }
+      if (!draft.addr) { toast('Address is required.'); return; }
+      if (draft.lat == null) { toast('Set & verify the pin first.'); return; }
+
+      // Validate hours: drop incomplete rows; ensure open<close
+      draft.hours = draft.hours.filter(h => h.date && h.open && h.close && h.open < h.close);
+
+      const payload = {
+        name: draft.name, sellerName: draft.sellerName,
+        items: draft.items, addr: draft.addr, area: draft.area,
+        lat: draft.lat, lon: draft.lon, pinVerified: !!draft.pinVerified,
+        hours: draft.hours,
+      };
+
+      if (editing) {
+        const ok = await window.PublicStops.update(editPublicId, payload);
+        if (ok) { closeSheet(); toast('Sale updated.'); }
+      } else {
+        toast('Publishing…');
+        const id = await window.PublicStops.publish(payload);
+        if (id) { closeSheet(); toast('🚀 Your sale is live!'); }
+      }
+    });
+  }
+
+  $sheetBody.innerHTML = ''; // ensure clean
+  render();
+  $sheetBg.classList.add('open');
+  $sheet.classList.add('open');
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// ⚡ Lightning items composer (specific-items price slash)
+// ──────────────────────────────────────────────────────────────────────────
+function openSlashItemsEditor(s) {
+  openSheetId = '__slash';
+  const existing = (s.priceSlash && s.priceSlash.items && Array.isArray(s.priceSlash.items.list))
+    ? s.priceSlash.items.list.slice()
+    : [];
+  let working = existing.length > 0 ? existing : [{ name: '', newPrice: '', photo: null }];
+
+  function render() {
+    $sheetBody.innerHTML = `
+      <h2>⚡ Lightning deals</h2>
+      <div style="font-size:0.82rem;color:var(--c-muted);margin-bottom:8px;">Item-specific price reductions. Shows on shoppers' maps as ⚡.</div>
+      <div id="sl-list">
+        ${working.map((it, i) => `
+          <div class="h-row" data-sl-idx="${i}" style="flex-wrap:wrap;">
+            <input type="text" data-sl-field="name" placeholder="Item name (e.g. Oak dresser)" value="${escapeHtml(it.name)}" style="flex:2;min-width:160px;padding:6px;border:1px solid #ccc;border-radius:4px;">
+            <input type="text" data-sl-field="newPrice" placeholder="New price ($)" value="${escapeHtml(it.newPrice)}" style="flex:1;min-width:90px;padding:6px;border:1px solid #ccc;border-radius:4px;">
+            <button class="h-rm" data-sl-rm="${i}">×</button>
+            <div style="flex-basis:100%;display:flex;gap:6px;align-items:center;margin-top:4px;">
+              ${it.photo ? `<img src="${it.photo}" style="height:48px;border-radius:4px;">` : ''}
+              <label style="background:#eee;padding:6px 10px;border-radius:4px;font-size:0.82rem;cursor:pointer;">📷 ${it.photo ? 'Change' : 'Add'} photo
+                <input type="file" data-sl-photo="${i}" accept="image/*" style="display:none;">
+              </label>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+      <button class="h-add" id="sl-add">+ Add another item</button>
+      <div class="sheet-actions" style="margin-top:14px;">
+        <button class="btn-primary" id="sl-publish" style="background:#e67e22;">⚡ Publish lightning deals</button>
+        <button class="btn-close" id="sl-close">Cancel</button>
+      </div>
+    `;
+    wire();
+  }
+
+  function wire() {
+    $sheetBody.querySelector('#sl-close').addEventListener('click', closeSheet);
+    $sheetBody.querySelector('#sl-add').addEventListener('click', () => {
+      working.push({ name: '', newPrice: '', photo: null });
+      render();
+    });
+    $sheetBody.querySelectorAll('[data-sl-idx]').forEach(row => {
+      const i = parseInt(row.dataset.slIdx, 10);
+      row.querySelectorAll('[data-sl-field]').forEach(inp => {
+        inp.addEventListener('input', () => { working[i][inp.dataset.slField] = inp.value; });
+      });
+    });
+    $sheetBody.querySelectorAll('[data-sl-rm]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        working.splice(parseInt(btn.dataset.slRm, 10), 1);
+        if (working.length === 0) working = [{ name: '', newPrice: '', photo: null }];
+        render();
+      });
+    });
+    $sheetBody.querySelectorAll('[data-sl-photo]').forEach(inp => {
+      inp.addEventListener('change', async (e) => {
+        const i = parseInt(inp.dataset.slPhoto, 10);
+        const file = e.target.files[0];
+        if (!file) return;
+        try {
+          toast('Compressing…');
+          working[i].photo = await compressImage(file, 800, 0.6);
+          render();
+        } catch (err) { toast('Photo failed.'); }
+      });
+    });
+
+    $sheetBody.querySelector('#sl-publish').addEventListener('click', async () => {
+      const list = working.filter(it => (it.name && it.name.trim()));
+      if (list.length === 0) { toast('Add at least one item.'); return; }
+      const ps = s.priceSlash || {};
+      const newSlash = Object.assign({}, ps, {
+        items: { active: true, ts: Date.now(), list }
+      });
+      const ok = await window.PublicStops.setPriceSlash(s.publicId, newSlash);
+      if (ok) {
+        closeSheet();
+        toast('⚡ Lightning deals broadcast!');
+      }
+    });
+  }
+
+  render();
+  $sheetBg.classList.add('open');
+  $sheet.classList.add('open');
+}
 
 // ──────────────────────────────────────────────────────────────────────────
 // Boot
 // ──────────────────────────────────────────────────────────────────────────
 load();
+
+// Welcome card — first launch only
+(function setupWelcome() {
+  const bg = document.getElementById('welcome-bg');
+  const btn = document.getElementById('welcome-dismiss');
+  if (!state.welcomeSeen) bg.classList.add('open');
+  btn.addEventListener('click', () => {
+    bg.classList.remove('open');
+    state.welcomeSeen = true;
+    save();
+  });
+})();
+
 refreshAllMarkers();
 renderList();
 fitToMarkers();
@@ -2240,8 +3092,10 @@ handleGroupDeepLink();
 // Initialize public stops feed (anonymous auth via Group module)
 window.PublicStops.init().catch(e => console.warn('PublicStops init failed', e));
 
-// Kick off background geocode for any missing seed coords
-setTimeout(geocodeMissingSeeds, 800);
+// Initialize anonymous usage stats (visit counter + presence)
+window.Stats.init().catch(e => console.warn('Stats init failed', e));
+
+// (No preloaded seeds in Fredonia — nothing to geocode at boot.)
 
 // On any storage change in another tab (rare on phones), reload
 window.addEventListener('storage', (e) => {
