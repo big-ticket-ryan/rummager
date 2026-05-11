@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="theme-color" content="#c0392b">
 <title>Fredonia Rummager</title>
-<link rel="icon" href="logo1.png">
+<link rel="icon" href="logo.png">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script type="module">
@@ -36,15 +36,16 @@
   /* ── Header ── */
   #header {
     background: #b8e0a4; color: #1f3a1f;
-    padding: 8px 12px; display: flex; align-items: center; gap: 8px;
+    padding: 0 12px; display: flex; align-items: center; gap: 8px;
     flex-shrink: 0;
   }
-  #header h1 { font-size: 1.05rem; font-weight: 600; flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; cursor: pointer; user-select: none; }
+  #header h1 { font-size: 1.05rem; font-weight: 600; flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0; cursor: pointer; user-select: none; margin: 0; }
   #header h1 .em { font-size: 1.2rem; margin-right: 4px; }
-  #header h1 .brand-logo { height: 44px; width: auto; display: block; }
+  #header h1 .brand-logo { height: 44px; width: auto; display: block; margin: 0; padding: 0; }
   #header h1 .brand-text { font-size: 0.95rem; font-weight: 700; letter-spacing: 0.02em; }
   .counts { font-size: 0.72rem; opacity: 0.95; line-height: 1.1; text-align: right; }
   .counts .row { display: flex; gap: 6px; justify-content: flex-end; }
+  .counts .row + .row { margin-top: 4px; }
   .counts .pill { background: rgba(255,255,255,0.2); border-radius: 8px; padding: 1px 6px; }
   .icon-btn { width: 38px; height: 38px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 1.1rem; background: rgba(0,0,0,0.08); color: #1f3a1f; }
   .icon-btn:active { background: rgba(255,255,255,0.35); }
@@ -54,6 +55,7 @@
     display: flex; gap: 6px; padding: 6px 10px; background: #fff;
     border-bottom: 1px solid var(--c-border);
     flex-shrink: 0; align-items: center;
+    position: relative; z-index: 1100;
   }
   #filter-btn {
     padding: 5px 10px; border-radius: 14px; font-size: 0.82rem;
@@ -63,7 +65,7 @@
   #filter-btn .lbl-current { font-weight: 600; }
   #filter-btn .caret { font-size: 0.7rem; opacity: 0.6; }
   #filter-menu {
-    position: absolute; top: 100%; left: 8px; z-index: 900;
+    position: absolute; top: 100%; left: 8px; z-index: 1200;
     background: white; border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,0.2);
     min-width: 180px; overflow: hidden;
     display: none;
@@ -494,10 +496,10 @@
 <body>
 
 <div id="header">
-  <h1><img class="brand-logo" src="logo1.png" alt="Fredonia Rummager"></h1>
+  <h1><img class="brand-logo" src="logo.png" alt="Fredonia Rummager"></h1>
   <div class="counts" id="counts">
-    <div class="row"><span class="pill" id="c-unvisited">— unvisited</span></div>
-    <div class="row"><span class="pill" id="c-visited">— visited</span> <span class="pill" id="c-revisit">— revisit</span> <span class="pill" id="c-must">— must</span></div>
+    <div class="row"><span class="pill" id="c-unvisited">— unvisited</span> <span class="pill" id="c-visited">— visited</span></div>
+    <div class="row"><span class="pill" id="c-revisit">— revisit</span> <span class="pill" id="c-must">— must</span></div>
   </div>
   <button class="icon-btn" id="btn-group" title="Group sharing">👥</button>
 </div>
