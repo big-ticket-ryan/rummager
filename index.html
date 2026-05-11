@@ -436,9 +436,9 @@
   }
   #pinverify .pv-bar b { color: #f1c40f; }
   #pinverify .pv-pin {
-    position: absolute; left: 50%; top: 50%;
-    transform: translate(-50%, -100%);
+    position: absolute; left: 0; top: 0;
     width: 36px; height: 54px;
+    transform: translate(-50%, -100%);
     pointer-events: none;
     filter: drop-shadow(0 4px 6px rgba(0,0,0,0.5));
   }
@@ -2832,7 +2832,21 @@ document.getElementById('menu-add-gps').addEventListener('click', () => {
 //   the pin, or long-presses to drop it elsewhere, then confirms.
 // ──────────────────────────────────────────────────────────────────────────
 const $pinverify = document.getElementById('pinverify');
+const $pvPin = $pinverify.querySelector('.pv-pin');
 let pinVerifyResolve = null;
+
+// Position the floating purple pin so its tip sits at the center of the
+// visible #map element (which is offset from viewport center by header,
+// chipbar, panel toolbar, and any list-panel taking the bottom half).
+function positionPvPin() {
+  if (!$pinverify.classList.contains('open')) return;
+  const mapEl = document.getElementById('map');
+  if (!mapEl) return;
+  const r = mapEl.getBoundingClientRect();
+  $pvPin.style.left = (r.left + r.width / 2) + 'px';
+  $pvPin.style.top = (r.top + r.height / 2) + 'px';
+}
+window.addEventListener('resize', positionPvPin);
 
 function startPinVerify(initLat, initLon) {
   return new Promise((resolve) => {
@@ -2844,6 +2858,11 @@ function startPinVerify(initLat, initLon) {
     $sheet.classList.remove('open');
     $sheetBg.classList.remove('open');
     $pinverify.classList.add('open');
+    // Defer until after map relayout from sheet close
+    requestAnimationFrame(() => {
+      map.invalidateSize();
+      positionPvPin();
+    });
   });
 }
 
