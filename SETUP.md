@@ -235,75 +235,85 @@ Server security rules only allow cross-user deletes if your auth UID is register
 
 ---
 
-## Fredonia edition — operations notes
+## Fredonia edition â€” operations notes
 
 ### Wiping leftover Belgium public sales (one-time)
 
-The Fredonia rebuild keeps the same Firebase project (ummager-37958), so any old Belgium-area public sales already in /publicStops will appear if their lat/lon happens to fall inside the new Ozaukee bbox. To clear them:
+The Fredonia rebuild keeps the same Firebase project (`rummager-37958`), so any old Belgium-area public sales already in `/publicStops` will appear if their lat/lon happens to fall inside the new Ozaukee bbox. To clear them:
 
 1. Open the live app on a phone you control.
 2. Tap the title bar **7 times** to unlock the admin sheet.
-3. Use **Wipe ALL public stops** to clear /publicStops/* from RTDB.
+3. Use **Wipe ALL public stops** to clear `/publicStops/*` from RTDB.
 4. (Optional) tighten the database rules below so future writes are bbox-validated.
 
-### Recommended Realtime Database rules
+### Recommended Realtime Database rules â€” full ruleset (replace ALL existing rules)
 
-In the Firebase Console ? Realtime Database ? Rules, replace the public-stops block with the tighter version below. It validates the new optional fields and constrains the bbox to Ozaukee County:
+In the Firebase Console â†’ Realtime Database â†’ Rules, paste this entire block. It keeps the v2.1 groups + admins blocks intact, tightens `publicStops` to the Ozaukee bbox, validates the new Fredonia fields (hours, priceSlash, name, sellerName, pinVerified), and adds the `publicStats` block needed by the usage-stats dashboard.
 
 ```json
 {
   "rules": {
+    "groups": {
+      "$code": {
+        ".read": "auth != null",
+        "members": {
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid",
+            ".validate": "newData.hasChildren(['name','lat','lon','updatedAt'])"
+          }
+        },
+        "meta": { ".write": "auth != null" }
+      }
+    },
     "publicStops": {
       ".read": "auth != null",
-      "15412": {
-        ".write": "auth != null && (!data.exists() || data.child('createdBy').val() == auth.uid)",
-        ".validate": "newData.hasChildren(['lat','lon','addr'])",
-        "lat":          { ".validate": "newData.isNumber() && newData.val() >= 43.30 && newData.val() <= 43.65" },
-        "lon":          { ".validate": "newData.isNumber() && newData.val() >= -88.10 && newData.val() <= -87.65" },
-        "addr":         { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 200" },
-        "name":         { ".validate": "newData.isString() && newData.val().length <= 80" },
-        "sellerName":   { ".validate": "newData.isString() && newData.val().length <= 40" },
-        "items":        { ".validate": "newData.isString() && newData.val().length <= 5000" },
-        "area":         { ".validate": "newData.isString() && newData.val().length <= 60" },
-        "createdBy":    { ".validate": "newData.isString() && newData.val() == auth.uid" },
-        "createdByName":{ ".validate": "newData.isString() && newData.val().length <= 40" },
-        "createdAt":    { ".validate": "newData.isNumber()" },
-        "updatedAt":    { ".validate": "newData.isNumber()" },
-        "pinVerified":  { ".validate": "newData.isBoolean()" },
-        "hours":        { ".validate": "newData.hasChildren() || !newData.exists()" },
-        "priceSlash":   { ".validate": "newData.hasChildren() || !newData.exists()" },
-        "flags":        {},
-        "":       { ".validate": false }
+      "$id": {
+        ".write": "auth != null && ((!data.exists() && newData.child('createdBy').val() === auth.uid) || (data.exists() && data.child('createdBy').val() === auth.uid) || root.child('admins').child(auth.uid).exists())",
+        ".validate": "newData.hasChildren(['addr','lat','lon','createdBy','createdAt']) && newData.child('lat').val() >= 43.30 && newData.child('lat').val() <= 43.65 && newData.child('lon').val() >= -88.10 && newData.child('lon').val() <= -87.65 && newData.child('addr').isString() && newData.child('addr').val().length <= 200",
+        "name":          { ".validate": "newData.isString() && newData.val().length <= 80" },
+        "sellerName":    { ".validate": "newData.isString() && newData.val().length <= 40" },
+        "items":         { ".validate": "newData.isString() && newData.val().length <= 5000" },
+        "area":          { ".validate": "newData.isString() && newData.val().length <= 60" },
+        "createdByName": { ".validate": "newData.isString() && newData.val().length <= 40" },
+        "pinVerified":   { ".validate": "newData.isBoolean()" },
+        "hours":         { ".validate": "newData.hasChildren() || !newData.exists()" },
+        "priceSlash":    { ".validate": "newData.hasChildren() || !newData.exists()" },
+        "expiresAt":     { ".validate": "newData.isNumber()" },
+        "updatedAt":     { ".validate": "newData.isNumber()" },
+        "flags":         { ".write": "auth != null" }
       }
+    },
+    "publicStats": {
+      ".read": "auth != null",
+      "totals": {
+        "$key": { ".write": "auth != null" }
+      },
+      "daily": {
+        "$day": {
+          "$key": { ".write": "auth != null" }
+        }
+      },
+      "online": {
+        "$uid": {
+          ".write": "auth != null && auth.uid === $uid"
+        }
+      }
+    },
+    "admins": {
+      ".read": "auth != null && root.child('admins').child(auth.uid).exists()",
+      "$uid": { ".write": false }
     }
   }
 }
 ```
+
+Click **Publish**.
 
 ### Map / bbox tuning
 
-If Fredonia residents need a wider catchment, edit two constants near the top of index.html:
+If Fredonia residents need a wider catchment, edit two constants near the top of `index.html`:
 
-- FREDONIA_DEFAULT — initial map center.
-- PUBLIC_BBOX — geofence used by both the tile-precache and the publish-sale validator.
+- `FREDONIA_DEFAULT` â€” initial map center.
+- `PUBLIC_BBOX` â€” geofence used by both the tile-precache and the publish-sale validator.
 
-### Realtime Database rules — usage stats block
-
-Append this sibling block under the top-level rules object so the anonymous-user counters work:
-
-```json
-"publicStats": {
-  ".read": "auth != null",
-  "totals": { "": { ".write": "auth != null" } },
-  "daily":  { "": { "": { ".write": "auth != null" } } },
-  "online": {
-    "$uid": {
-      ".write": "auth != null && auth.uid == $uid"
-    }
-  }
-}
-```
-
-(Backticks around $uid are markdown-escapes — use plain $uid in your real rules.)
-
-Remove the row-cap fields if you start hitting Firebase Spark plan caps; an Ozaukee-sized community will fit comfortably.
+> If you change the bbox, **also widen the `>= 43.30 / <= 43.65 / >= -88.10 / <= -87.65` numbers in the rule above**, or new pins outside the Ozaukee box will be rejected by Firebase even though the client allows them.
