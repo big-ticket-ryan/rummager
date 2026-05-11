@@ -3104,15 +3104,17 @@ load();
 
 refreshAllMarkers();
 renderList();
-fitToMarkers();
+// (Do NOT auto-fit to markers or auto-start GPS — keep the boot view centered
+//  on Fredonia per user preference. The user can tap 📍 in the header to
+//  locate themselves on demand.)
 syncPanelToggleStyles();
 setGpsToggleUI(false);
 
-// Auto-start GPS immediately (per user preference). If perm denied, the error
-// handler will turn it back off. Honor saved preference if present.
+// Honor a saved "GPS was on last time" preference, but don't recenter the map.
+// If they want recentering, they tap 📍.
 const savedGpsPref = (() => { try { return localStorage.getItem(GPS_PREF_KEY); } catch (e) { return null; } })();
-if (savedGpsPref !== '0') {
-  startWatching({ center: true });
+if (savedGpsPref === '1') {
+  startWatching({ center: false });
 }
 
 // Restore group state (passive subscribe) and handle deep links
