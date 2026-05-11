@@ -752,7 +752,7 @@ function findStop(id) { return state.stops.find(s => s.id === id); }
 // ──────────────────────────────────────────────────────────────────────────
 // Map setup — Fredonia, WI
 // ──────────────────────────────────────────────────────────────────────────
-const FREDONIA_DEFAULT = { lat: 43.470, lon: -87.853 };
+const FREDONIA_DEFAULT = { lat: 43.4711, lon: -87.9531 };
 const map = L.map('map', { zoomControl: true, tap: true }).setView([FREDONIA_DEFAULT.lat, FREDONIA_DEFAULT.lon], 14);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; OpenStreetMap',
