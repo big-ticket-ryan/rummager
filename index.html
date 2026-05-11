@@ -1170,6 +1170,7 @@ function renderSheet(s) {
       ${isMine ? `<button class="btn-secondary" id="b-edit-sale">✏️ Edit my sale</button>` : ''}
       ${isMine ? `<button class="btn-danger" id="b-del-sale">Delete my sale</button>` : ''}
       ${(!isPublic && (s.source === 'manual' || s.source === 'gps')) ? `<button class="btn-danger" id="b-del">Delete</button>` : ''}
+      ${(isPublic && !isMine) ? `<button class="btn-danger" id="b-admin-del" style="display:none;background:#7f0000;">🛠️ Delete this sale (admin)</button>` : ''}
       <button class="btn-close" id="b-close">Close</button>
     </div>
   `;
@@ -1253,6 +1254,21 @@ function wireSheet(s) {
       const ok = await window.PublicStops.deleteOne(s.publicId);
       if (ok) { closeSheet(); toast('Sale deleted.'); }
       else toast('Delete failed.');
+    });
+  }
+
+  // Admin: delete any public sale (button is hidden by default; revealed if isAdmin)
+  const adminDelBtn = $sheetBody.querySelector('#b-admin-del');
+  if (adminDelBtn && s.publicId) {
+    window.PublicStops.isAdmin().then(yes => {
+      if (!yes) return;
+      adminDelBtn.style.display = '';
+      adminDelBtn.addEventListener('click', async () => {
+        if (!confirm(`ADMIN: permanently delete "${s.name || s.addr}" for everyone?`)) return;
+        const ok = await window.PublicStops.deleteOne(s.publicId);
+        if (ok) { closeSheet(); toast('Sale deleted by admin.'); }
+        else toast('Admin delete failed (check /admins/<uid> in Firebase).');
+      });
     });
   }
 
@@ -2250,8 +2266,22 @@ window.PublicStops = (() => {
   function myUid() { return auth && auth.currentUser ? auth.currentUser.uid : null; }
   function count() { return Object.keys(cache).length; }
 
+  // Admin status — cached after first check. Returns null until known, then true/false.
+  let _adminCache = null;
+  async function isAdmin() {
+    if (_adminCache !== null) return _adminCache;
+    if (!await init()) return false;
+    try {
+      const uid = myUid();
+      if (!uid) return false;
+      const snap = await fb.get(fb.ref(db, `admins/${uid}`));
+      _adminCache = snap.exists() && snap.val() === true;
+      return _adminCache;
+    } catch (e) { return false; }
+  }
+
   return { init, isConfigured, publish, update, setPriceSlash, flag, deleteOne, wipeAll,
-           get, isNew, ackNew, myUid, count, bboxOk };
+           get, isNew, ackNew, myUid, count, bboxOk, isAdmin };
 })();
 // (Old "Save/Flag/Ignore" public-stop sheet removed — public sales are now
 //  auto-merged into the local list and use the regular detail sheet.)
