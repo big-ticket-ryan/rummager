@@ -499,9 +499,7 @@
     <div class="row"><span class="pill" id="c-unvisited">— unvisited</span></div>
     <div class="row"><span class="pill" id="c-visited">— visited</span> <span class="pill" id="c-revisit">— revisit</span> <span class="pill" id="c-must">— must</span></div>
   </div>
-  <button class="icon-btn" id="btn-locate" title="Center on me">📍</button>
   <button class="icon-btn" id="btn-group" title="Group sharing">👥</button>
-  <button class="icon-btn" id="btn-add-manual" title="Add address">＋</button>
 </div>
 
 <div id="share-banner">
@@ -1551,12 +1549,6 @@ function toggleGps() {
 
 document.getElementById('gps-toggle').addEventListener('click', toggleGps);
 
-document.getElementById('btn-locate').addEventListener('click', () => {
-  if (!gpsEnabled) { startWatching({ center: true }); return; }
-  if (lastKnownPos) map.setView([lastKnownPos.lat, lastKnownPos.lon], 16);
-  else toast('Locating…');
-});
-
 document.getElementById('map-recenter').addEventListener('click', () => {
   if (!gpsEnabled) { startWatching({ center: true }); return; }
   if (lastKnownPos) map.setView([lastKnownPos.lat, lastKnownPos.lon], 16);
@@ -1645,8 +1637,6 @@ function openAddSheet({ lat = null, lon = null, prefilledAddr = '', defaultStatu
     } catch (e) { submitting = false; saveBtn.disabled = false; throw e; }
   });
 }
-
-document.getElementById('btn-add-manual').addEventListener('click', () => openFabMenu());
 
 // ──────────────────────────────────────────────────────────────────────────
 // FAB — opens the + menu (publish public sale / add private / GPS quick-add)
