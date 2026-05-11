@@ -257,11 +257,11 @@
   /* ── Bottom sheet ── */
   #sheet-bg {
     position: fixed; inset: 0; background: rgba(0,0,0,0.4);
-    z-index: 1000; display: none;
+    z-index: 1300; display: none;
   }
   #sheet-bg.open { display: block; }
   #sheet {
-    position: fixed; left: 0; right: 0; bottom: 0; z-index: 1001;
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 1301;
     background: white; border-radius: 14px 14px 0 0;
     max-height: 92vh; overflow-y: auto;
     transform: translateY(100%); transition: transform 0.25s;
@@ -269,6 +269,15 @@
   }
   #sheet.open { transform: translateY(0); }
   #sheet .grabber { width: 40px; height: 4px; background: #ccc; border-radius: 2px; margin: 0 auto 10px; }
+  #sheet-close {
+    position: absolute; top: 6px; right: 8px;
+    width: 36px; height: 36px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.4rem; line-height: 1; color: #333;
+    background: rgba(0,0,0,0.06); border: none; cursor: pointer;
+    z-index: 2;
+  }
+  #sheet-close:active { background: rgba(0,0,0,0.18); }
   #sheet h2 { font-size: 1.1rem; margin-bottom: 8px; }
   #sheet label { display: block; font-size: 0.78rem; color: var(--c-muted); margin-top: 10px; margin-bottom: 3px; text-transform: uppercase; letter-spacing: 0.4px; }
   #sheet input[type=text], #sheet textarea {
@@ -343,7 +352,13 @@
   .leaflet-popup-content { margin: 8px 10px; max-width: 240px; }
   .pop-addr { font-weight: 700; font-size: 0.92rem; color: var(--c-text); margin-bottom: 4px; }
   .pop-area { font-size: 0.72rem; color: var(--c-muted); margin-bottom: 4px; }
+  .pop-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
   .pop-open { background: var(--c-me); color: white; padding: 5px 10px; border-radius: 4px; font-size: 0.8rem; font-weight: 600; }
+  .pop-status { padding: 5px 10px; border-radius: 4px; font-size: 0.8rem; font-weight: 600; color: white; border: none; cursor: pointer; white-space: nowrap; }
+  .pop-status.unvisited { background: var(--c-unvisited); }
+  .pop-status.visited   { background: var(--c-visited); }
+  .pop-status.revisit   { background: var(--c-revisit); }
+  .pop-status.must      { background: var(--c-must); }
 
   /* Desktop layout */
   @media (min-width: 900px) {
@@ -580,6 +595,7 @@
 <!-- Bottom sheet -->
 <div id="sheet-bg"></div>
 <div id="sheet">
+  <button id="sheet-close" type="button" aria-label="Close">×</button>
   <div class="grabber"></div>
   <div id="sheet-body"></div>
 </div>
@@ -821,10 +837,15 @@ function makeIcon(stop) {
 }
 
 function popupHtml(stop) {
+  const status = stop.status || 'unvisited';
+  const labels = { unvisited: 'Unvisited', visited: 'Visited', revisit: 'Revisit', must: 'Must visit' };
   return `<div class="pop-addr">${escapeHtml(stop.name || stop.addr)}</div>
     ${stop.name ? `<div class="pop-area">${escapeHtml(stop.addr)}</div>` : ''}
     ${stop.area && stop.area !== 'Fredonia' ? `<div class="pop-area">${escapeHtml(stop.area)}</div>` : ''}
-    <button class="pop-open" data-open-id="${stop.id}">Open details</button>`;
+    <div class="pop-actions">
+      <button class="pop-open" data-open-id="${stop.id}">Open details</button>
+      <button class="pop-status ${status}" data-rotate-id="${stop.id}" title="Tap to change status">${labels[status]}</button>
+    </div>`;
 }
 
 function ensureMarker(stop) {
@@ -860,6 +881,27 @@ document.addEventListener('click', (e) => {
   const id = btn.dataset.openId;
   map.closePopup();
   openSheet(id);
+});
+
+// Quick-rotate status button inside popup: unvisited → visited → revisit → must → unvisited
+const STATUS_ROTATION = ['unvisited', 'visited', 'revisit', 'must'];
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('.leaflet-popup-content [data-rotate-id]');
+  if (!btn) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const id = btn.dataset.rotateId;
+  const s = findStop(id);
+  if (!s) return;
+  const cur = s.status || 'unvisited';
+  const idx = STATUS_ROTATION.indexOf(cur);
+  s.status = STATUS_ROTATION[(idx + 1) % STATUS_ROTATION.length];
+  s.updatedAt = Date.now();
+  ensureMarker(s);
+  const m = markersById[s.id];
+  if (m) m.setPopupContent(popupHtml(s));
+  save();
+  renderList();
 });
 
 function refreshAllMarkers() {
@@ -1097,6 +1139,7 @@ function closeSheet() {
   $sheetBg.classList.remove('open');
   openSheetId = null;
 }
+document.getElementById('sheet-close').addEventListener('click', closeSheet);
 
 function renderSheet(s) {
   const isPublic = s.source === 'public';
