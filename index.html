@@ -2728,6 +2728,8 @@ window.Chat = (() => {
       b.classList.toggle('active', b.dataset.tab === tab);
     });
     if (activeUnsub) { activeUnsub(); activeUnsub = null; }
+    // Clear the previous tab's content immediately so the user never sees stale messages.
+    document.getElementById('chat-list').innerHTML = '';
     if (panelOpen && ready) subscribeActive();
   }
 
