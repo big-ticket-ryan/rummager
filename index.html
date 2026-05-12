@@ -2853,7 +2853,7 @@ window.Chat = (() => {
       });
     } catch (e) {
       console.warn('chat send failed', e);
-      toast('Send failed.');
+      toast('Send failed: ' + ((e && (e.code || e.message)) || 'unknown'));
     }
   }
 
