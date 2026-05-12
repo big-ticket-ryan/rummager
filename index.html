@@ -249,14 +249,18 @@
     cursor: pointer; border: none;
   }
   #chat-fab:active { transform: scale(0.95); }
-  #chat-fab .badge-unread {
-    position: absolute; top: 4px; right: 4px;
-    min-width: 16px; height: 16px; padding: 0 4px;
-    background: #e74c3c; color: white; font-size: 0.65rem; font-weight: 700;
-    border-radius: 8px; display: none; align-items: center; justify-content: center;
+  #chat-fab .badge-count {
+    position: absolute;
+    min-width: 18px; height: 18px; padding: 0 5px;
+    background: #e74c3c; color: white;
+    font-size: 0.68rem; font-weight: 700; line-height: 1;
+    border-radius: 9px;
+    display: none; align-items: center; justify-content: center;
     border: 2px solid white;
   }
-  #chat-fab.has-unread .badge-unread { display: flex; }
+  #chat-fab .badge-count.show { display: flex; }
+  #chat-fab .badge-group  { top: -4px; right: -4px; background: #8e44ad; }
+  #chat-fab .badge-public { bottom: -4px; right: -4px; background: #2980b9; }
 
   /* Chat slide-in panel */
   #chat-panel {
@@ -673,7 +677,7 @@
 <button id="fab" title="Add a stop or publish a public sale">➕</button>
 
 <button id="chat-fab" title="Open chat" aria-label="Open chat">
-  💬<span class="badge-unread" id="chat-unread">•</span>
+  💬<span class="badge-count badge-group" id="chat-unread-group">0</span><span class="badge-count badge-public" id="chat-unread-public">0</span>
 </button>
 
 <!-- Chat slide-in panel -->
@@ -2603,7 +2607,7 @@ window.Chat = (() => {
   let activeTab = 'public';
   let activeUnsub = null;
   let badgeUnsubs = {};
-  let unreadByTab = { public: false, group: false };
+  let unreadByTab = { public: 0, group: 0 };
   let lastSeen = loadLastSeen();
   let messages = { public: {}, group: {} };
   let panelOpen = false;
@@ -2650,18 +2654,22 @@ window.Chat = (() => {
   function attachBadge(tab) {
     if (badgeUnsubs[tab]) { badgeUnsubs[tab](); badgeUnsubs[tab] = null; }
     const path = tabPath(tab);
-    if (!path) return;
-    const q = fb.query(fb.ref(db, path), fb.limitToLast(1));
+    if (!path) { unreadByTab[tab] = 0; updateBadge(); return; }
+    const q = fb.query(fb.ref(db, path), fb.limitToLast(PAGE_SIZE));
     badgeUnsubs[tab] = fb.onValue(q, (snap) => {
       const val = snap.val() || {};
       const seenKey = lastSeenKeyFor(tab);
       const seen = (seenKey && lastSeen[seenKey]) || 0;
-      let isUnread = false;
+      let count = 0;
       Object.values(val).forEach(m => {
         if (!m || m.uid === myUid) return;
-        if ((m.ts || 0) > seen) isUnread = true;
+        if ((m.ts || 0) > seen) count++;
       });
-      unreadByTab[tab] = isUnread;
+      unreadByTab[tab] = count;
+      // If panel is open on this tab, treat as seen immediately.
+      if (panelOpen && activeTab === tab) {
+        unreadByTab[tab] = 0;
+      }
       updateBadge();
     });
   }
@@ -2675,7 +2683,16 @@ window.Chat = (() => {
   function updateBadge() {
     const fab = document.getElementById('chat-fab');
     if (!fab) return;
-    fab.classList.toggle('has-unread', unreadByTab.public || unreadByTab.group);
+    const fmt = (n) => n > 9 ? '9+' : String(n);
+    const setBadge = (id, n) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.textContent = fmt(n);
+      el.classList.toggle('show', n > 0);
+    };
+    setBadge('chat-unread-group', unreadByTab.group || 0);
+    setBadge('chat-unread-public', unreadByTab.public || 0);
+    fab.classList.toggle('has-unread', (unreadByTab.public || 0) + (unreadByTab.group || 0) > 0);
   }
 
   function open() {
@@ -2731,7 +2748,7 @@ window.Chat = (() => {
     Object.values(tabMsgs).forEach(m => { if (m && m.ts && m.ts > maxTs) maxTs = m.ts; });
     lastSeen[seenKey] = maxTs;
     saveLastSeen();
-    unreadByTab[activeTab] = false;
+    unreadByTab[activeTab] = 0;
     updateBadge();
   }
 
