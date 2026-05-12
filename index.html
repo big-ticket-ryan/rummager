@@ -2003,8 +2003,10 @@ window.Group = (() => {
   let pref = loadPref();
   let sharing = false;
   let currentGroup = null;
+  let currentGroupName = '';
   let memberMarkers = {}; // memberId -> { marker, label }
   let unsubscribeMembers = null;
+  let unsubscribeMeta = null;
   let myDisconnectRef = null;
 
   function loadPref() {
@@ -2101,9 +2103,11 @@ window.Group = (() => {
 
     // Leave current group's listener, if any
     if (unsubscribeMembers) { unsubscribeMembers(); unsubscribeMembers = null; }
+    if (unsubscribeMeta) { unsubscribeMeta(); unsubscribeMeta = null; }
     clearAllMemberMarkers();
 
     currentGroup = code;
+    currentGroupName = '';
     pref.currentGroupCode = code;
     if (!pref.color) pref.color = pickColor();
     savePref();
@@ -2114,6 +2118,15 @@ window.Group = (() => {
         createdAt: fb.serverTimestamp(),
       });
     } catch (e) { /* may already exist */ }
+
+    // Subscribe to meta (for group name)
+    const metaRef = fb.ref(db, `groups/${code}/meta`);
+    unsubscribeMeta = fb.onValue(metaRef, (snap) => {
+      const meta = snap.val() || {};
+      currentGroupName = (meta.name || '').toString().slice(0, 40);
+      updateShareBannerText();
+      if (window.Chat && window.Chat.refreshGroupLabel) window.Chat.refreshGroupLabel();
+    });
 
     // Subscribe to members
     const membersRef = fb.ref(db, `groups/${code}/members`);
@@ -2127,11 +2140,30 @@ window.Group = (() => {
   function leaveGroup() {
     if (sharing) stopSharing();
     if (unsubscribeMembers) { unsubscribeMembers(); unsubscribeMembers = null; }
+    if (unsubscribeMeta) { unsubscribeMeta(); unsubscribeMeta = null; }
     clearAllMemberMarkers();
     currentGroup = null;
+    currentGroupName = '';
     pref.currentGroupCode = null;
     savePref();
     if (window.Chat && window.Chat.refreshGroupBinding) window.Chat.refreshGroupBinding();
+    if (window.Chat && window.Chat.refreshGroupLabel) window.Chat.refreshGroupLabel();
+  }
+
+  async function setGroupName(name) {
+    if (!currentGroup) return false;
+    const trimmed = (name || '').toString().trim().slice(0, 40);
+    try {
+      await fb.update(fb.ref(db, `groups/${currentGroup}/meta`), { name: trimmed });
+      return true;
+    } catch (e) { console.warn('setGroupName failed', e); return false; }
+  }
+
+  function updateShareBannerText() {
+    if (!sharing) return;
+    const label = currentGroupName ? `${currentGroupName} (${currentGroup})` : currentGroup;
+    const el = document.getElementById('share-banner-text');
+    if (el) el.textContent = `Sharing live location to ${label} as ${pref.name}`;
   }
 
   async function startSharing() {
@@ -2140,7 +2172,7 @@ window.Group = (() => {
     if (!pref.name) { toast('Set your name first.'); return false; }
     sharing = true;
     document.getElementById('share-banner').classList.add('on');
-    document.getElementById('share-banner-text').textContent = `Sharing live location to ${currentGroup} as ${pref.name}`;
+    updateShareBannerText();
     // Set onDisconnect to mark stopped
     try {
       const meRef = fb.ref(db, `groups/${currentGroup}/members/${pref.memberId}`);
@@ -2196,9 +2228,10 @@ window.Group = (() => {
   return {
     isConfigured, isSharing, joinGroup, leaveGroup, startSharing, stopSharing,
     publishMyPosition, tryRestore,
-    makeCode, initFirebase,
+    makeCode, initFirebase, setGroupName,
     get pref() { return pref; },
     get currentGroup() { return currentGroup; },
+    get currentGroupName() { return currentGroupName; },
     setName(n) { pref.name = n; if (!pref.color) pref.color = pickColor(); savePref(); },
   };
 })();
@@ -2223,6 +2256,8 @@ function openGroupSheet() {
     ${code ? `
       <label>Current group</label>
       <div class="group-code">${escapeHtml(code)}</div>
+      <label>Group name</label>
+      <input type="text" id="g-group-name" placeholder="e.g. Perez Crew" maxlength="40" value="${escapeHtml(g.currentGroupName || '')}">
       <div id="g-members" style="margin-top:6px;"></div>
       <div class="sheet-actions">
         ${g.isSharing()
@@ -2276,6 +2311,16 @@ function openGroupSheet() {
       if (await g.joinGroup(c)) { openGroupSheet(); }
     });
   } else {
+    const groupNameInput = $sheetBody.querySelector('#g-group-name');
+    if (groupNameInput) {
+      groupNameInput.addEventListener('blur', async (e) => {
+        const newName = e.target.value.trim();
+        if (newName === (g.currentGroupName || '')) return;
+        const ok = await g.setGroupName(newName);
+        if (ok) toast(newName ? 'Group renamed.' : 'Group name cleared.');
+        else toast('Rename failed (check rules).');
+      });
+    }
     const startBtn = $sheetBody.querySelector('#g-start-share');
     if (startBtn) startBtn.addEventListener('click', async () => {
       const nm = $sheetBody.querySelector('#g-name').value.trim();
@@ -2415,6 +2460,7 @@ window.PublicStops = (() => {
       pinVerified: !!obj.pinVerified,
       hours: Array.isArray(obj.hours) ? obj.hours : [],
       priceSlash: obj.priceSlash || null,
+      publicPhotos: Array.isArray(obj.publicPhotos) ? obj.publicPhotos.slice(0, 3) : [],
       source: 'public',
       createdByName: obj.createdByName || obj.sellerName || 'Anonymous',
       createdBy: obj.createdBy || null,
@@ -2504,7 +2550,7 @@ window.PublicStops = (() => {
     const now = Date.now();
     const fullPayload = Object.assign({
       addr: '', name: '', sellerName: '', items: '', area: 'Fredonia',
-      hours: [], pinVerified: false, priceSlash: null,
+      hours: [], pinVerified: false, priceSlash: null, publicPhotos: [],
     }, payload, {
       createdBy: me.uid,
       createdByName: payload.sellerName || (window.Group && window.Group.pref.name) || 'Anonymous',
@@ -2687,7 +2733,15 @@ window.Chat = (() => {
   function refreshGroupBinding() {
     if (!ready) return;
     attachBadge('group');
+    refreshGroupLabel();
     if (panelOpen && activeTab === 'group') subscribeActive();
+  }
+
+  function refreshGroupLabel() {
+    const tab = document.querySelector('#chat-panel .ch-tab[data-tab="group"]');
+    if (!tab) return;
+    const name = (window.Group && window.Group.currentGroupName) || '';
+    tab.textContent = name ? `💬 ${name}` : 'Group';
   }
 
   function updateBadge() {
@@ -2948,6 +3002,7 @@ window.Chat = (() => {
     document.querySelectorAll('#chat-panel .ch-tab').forEach(b => {
       b.addEventListener('click', () => setTab(b.dataset.tab));
     });
+    refreshGroupLabel();
     sendBtn.addEventListener('click', () => {
       const v = input.value;
       if (!v.trim()) return;
@@ -2965,7 +3020,7 @@ window.Chat = (() => {
     });
   }
 
-  return { init, open, close, setTab, refreshGroupBinding, wireUi };
+  return { init, open, close, setTab, refreshGroupBinding, refreshGroupLabel, wireUi };
 })();
 
 // ──────────────────────────────────────────────────────────────────────────
