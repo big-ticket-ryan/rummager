@@ -82,7 +82,18 @@
   #filter-menu .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
   #filter-menu .check { margin-left: auto; color: var(--c-me); font-weight: 700; opacity: 0; }
   #filter-menu button.active .check { opacity: 1; }
-  #search { flex: 1; min-width: 80px; padding: 5px 9px; border: 1px solid #ccc; border-radius: 14px; font-size: 0.82rem; }
+  #search { flex: 1; min-width: 80px; padding: 5px 26px 5px 9px; border: 1px solid #ccc; border-radius: 14px; font-size: 0.82rem; }
+  .search-wrap { position: relative; flex: 1; min-width: 80px; display: flex; }
+  .search-wrap #search { width: 100%; flex: 1 1 auto; min-width: 0; }
+  #search-clear {
+    position: absolute; top: 50%; right: 6px; transform: translateY(-50%);
+    width: 18px; height: 18px; border-radius: 50%;
+    display: none; align-items: center; justify-content: center;
+    background: #bbb; color: white; font-size: 0.7rem; line-height: 1;
+    border: none; cursor: pointer; padding: 0;
+  }
+  #search-clear.show { display: flex; }
+  #search-clear:active { background: #888; }
   #sort-btn { font-size: 1rem; padding: 4px 8px; border: 1px solid #ccc; border-radius: 14px; background: white; flex-shrink: 0; }
 
   /* ── Panels ── */
@@ -352,7 +363,7 @@
   .leaflet-popup-content { margin: 8px 10px; max-width: 240px; }
   .pop-addr { font-weight: 700; font-size: 0.92rem; color: var(--c-text); margin-bottom: 4px; }
   .pop-area { font-size: 0.72rem; color: var(--c-muted); margin-bottom: 4px; }
-  .pop-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
+  .pop-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
   .pop-open { background: var(--c-me); color: white; padding: 5px 10px; border-radius: 4px; font-size: 0.8rem; font-weight: 600; }
   .pop-status { padding: 5px 10px; border-radius: 4px; font-size: 0.8rem; font-weight: 600; color: white; border: none; cursor: pointer; white-space: nowrap; }
   .pop-status.unvisited { background: var(--c-unvisited); }
@@ -534,7 +545,10 @@
     <button data-filter="must"><span class="dot" style="background:var(--c-must)"></span>Must visit<span class="check">✓</span></button>
   </div>
   <form id="search-form" style="flex:1;display:flex;gap:4px;align-items:center;min-width:0;" onsubmit="return false;">
-    <input type="text" id="search" placeholder="Search…" enterkeyhint="search" />
+    <span class="search-wrap">
+      <input type="text" id="search" placeholder="Search…" enterkeyhint="search" />
+      <button type="button" id="search-clear" aria-label="Clear search" title="Clear">✕</button>
+    </span>
     <button type="submit" id="search-go" title="Search" style="padding:5px 10px;border:1px solid #ccc;border-radius:14px;background:var(--c-me);color:white;font-size:0.82rem;font-weight:600;flex-shrink:0;">🔍</button>
   </form>
   <button id="sort-btn" title="Sort">⇅</button>
@@ -846,13 +860,13 @@ function makeIcon(stop) {
 function popupHtml(stop) {
   const status = stop.status || 'unvisited';
   const labels = { unvisited: 'Unvisited', visited: 'Visited', revisit: 'Revisit', must: 'Must visit' };
-  return `<div class="pop-addr">${escapeHtml(stop.name || stop.addr)}</div>
-    ${stop.name ? `<div class="pop-area">${escapeHtml(stop.addr)}</div>` : ''}
-    ${stop.area && stop.area !== 'Fredonia' ? `<div class="pop-area">${escapeHtml(stop.area)}</div>` : ''}
-    <div class="pop-actions">
+  return `<div class="pop-actions">
       <button class="pop-open" data-open-id="${stop.id}">Open details</button>
       <button class="pop-status ${status}" data-rotate-id="${stop.id}" title="Tap to change status">${labels[status]}</button>
-    </div>`;
+    </div>
+    <div class="pop-addr">${escapeHtml(stop.name || stop.addr)}</div>
+    ${stop.name ? `<div class="pop-area">${escapeHtml(stop.addr)}</div>` : ''}
+    ${stop.area && stop.area !== 'Fredonia' ? `<div class="pop-area">${escapeHtml(stop.area)}</div>` : ''}`;
 }
 
 function ensureMarker(stop) {
@@ -1483,9 +1497,22 @@ $filterMenu.querySelectorAll('button[data-filter]').forEach(btn => {
 });
 
 let searchT;
+const $searchClear = document.getElementById('search-clear');
+function updateSearchClearVisibility() {
+  $searchClear.classList.toggle('show', $search.value.length > 0);
+}
 $search.addEventListener('input', () => {
+  updateSearchClearVisibility();
   clearTimeout(searchT); searchT = setTimeout(renderList, 120);
 });
+$searchClear.addEventListener('click', () => {
+  $search.value = '';
+  updateSearchClearVisibility();
+  clearTimeout(searchT);
+  renderList();
+  $search.focus();
+});
+updateSearchClearVisibility();
 
 // Phase 5: Send/blur — submitting the search form (Enter key, or 🔍 button) commits + dismisses keyboard
 document.getElementById('search-form').addEventListener('submit', (e) => {
@@ -2510,6 +2537,10 @@ async function sha256Hex(str) {
   if (!title) return;
   let taps = 0, firstTapAt = 0;
   title.addEventListener('click', async () => {
+    // Single-tap behavior: always recenter on Fredonia at default zoom
+    if (typeof map !== 'undefined' && map) {
+      map.setView([FREDONIA_DEFAULT.lat, FREDONIA_DEFAULT.lon], 14);
+    }
     const now = Date.now();
     if (now - firstTapAt > 5000) { taps = 0; firstTapAt = now; }
     taps++;
