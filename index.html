@@ -465,7 +465,8 @@
   .leaflet-popup-content { margin: 8px 10px; max-width: 240px; }
   .pop-addr { font-weight: 700; font-size: 0.92rem; color: var(--c-text); margin-bottom: 4px; }
   .pop-area { font-size: 0.72rem; color: var(--c-muted); margin-bottom: 4px; }
-  .pop-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
+  .pop-open-row { margin-bottom: 6px; }
+  .pop-status-row { margin-top: 6px; }
   .pop-open { background: var(--c-me); color: white; padding: 5px 10px; border-radius: 4px; font-size: 0.8rem; font-weight: 600; }
   .pop-status { padding: 5px 10px; border-radius: 4px; font-size: 0.8rem; font-weight: 600; color: white; border: none; cursor: pointer; white-space: nowrap; }
   .pop-status.unvisited { background: var(--c-unvisited); }
@@ -985,13 +986,15 @@ function makeIcon(stop) {
 function popupHtml(stop) {
   const status = stop.status || 'unvisited';
   const labels = { unvisited: 'Unvisited', visited: 'Visited', revisit: 'Revisit', must: 'Must visit' };
-  return `<div class="pop-actions">
+  return `<div class="pop-open-row">
       <button class="pop-open" data-open-id="${stop.id}">Open details</button>
-      <button class="pop-status ${status}" data-rotate-id="${stop.id}" title="Tap to change status">${labels[status]}</button>
     </div>
     <div class="pop-addr">${escapeHtml(stop.name || stop.addr)}</div>
     ${stop.name ? `<div class="pop-area">${escapeHtml(stop.addr)}</div>` : ''}
-    ${stop.area && stop.area !== 'Fredonia' ? `<div class="pop-area">${escapeHtml(stop.area)}</div>` : ''}`;
+    ${stop.area && stop.area !== 'Fredonia' ? `<div class="pop-area">${escapeHtml(stop.area)}</div>` : ''}
+    <div class="pop-status-row">
+      <button class="pop-status ${status}" data-rotate-id="${stop.id}" title="Tap to change status">${labels[status]}</button>
+    </div>`;
 }
 
 function ensureMarker(stop) {
