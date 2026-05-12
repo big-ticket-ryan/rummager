@@ -377,6 +377,9 @@
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 1301;
     background: white; border-radius: 14px 14px 0 0;
     max-height: 92vh; overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
     transform: translateY(100%); transition: transform 0.25s;
     padding: 14px 14px 24px;
   }
@@ -3686,7 +3689,7 @@ function openPublishSaleSheet({ editPublicId = null } = {}) {
         <button class="h-add" id="ps-hours-add">+ Add a day</button>
       </div>
 
-      <label>Public photos (${draft.publicPhotos.length} / 3)</label>
+      <label id="ps-photo-label">Public photos (${draft.publicPhotos.length} / 3)</label>
       <div style="font-size:0.78rem;color:var(--c-muted);margin-bottom:4px;">Visible to all shoppers. Up to 3.</div>
       <div class="photo-grid" id="ps-photo-grid">
         ${draft.publicPhotos.map((p, i) => `<div class="ph" data-pp-idx="${i}" style="position:relative;"><img src="${p}" alt=""><button class="h-rm" data-pp-rm="${i}" style="position:absolute;top:2px;right:2px;padding:2px 6px;font-size:0.75rem;">×</button></div>`).join('')}
@@ -3744,20 +3747,47 @@ function openPublishSaleSheet({ editPublicId = null } = {}) {
     $sheetBody.querySelector('#ps-items').addEventListener('input', e => draft.items = e.target.value);
     $sheetBody.querySelector('#ps-addr').addEventListener('input', e => draft.addr = e.target.value);
 
+    // Surgically rebuild only the photo-grid (avoids whole-sheet re-render
+    // which loses focus, blurs the keyboard, and can stutter on phones with
+    // big data-URLs in the DOM).
+    function rerenderPhotoGrid() {
+      const grid = $sheetBody.querySelector('#ps-photo-grid');
+      const label = $sheetBody.querySelector('#ps-photo-label');
+      if (!grid) return;
+      if (label) label.textContent = `Public photos (${draft.publicPhotos.length} / 3)`;
+      grid.innerHTML = `
+        ${draft.publicPhotos.map((p, i) => `<div class="ph" data-pp-idx="${i}" style="position:relative;"><img src="${p}" alt=""><button class="h-rm" data-pp-rm="${i}" style="position:absolute;top:2px;right:2px;padding:2px 6px;font-size:0.75rem;">×</button></div>`).join('')}
+        ${draft.publicPhotos.length < 3 ? `<label class="ph add" for="ps-photo">＋<input type="file" id="ps-photo" accept="image/*" capture="environment" style="display:none"></label>` : ''}
+      `;
+      // Re-bind the new add input
+      const newInput = $sheetBody.querySelector('#ps-photo');
+      if (newInput) newInput.addEventListener('change', onPhotoChange);
+      // Re-bind delete buttons
+      $sheetBody.querySelectorAll('[data-pp-rm]').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const i = parseInt(btn.dataset.ppRm, 10);
+          draft.publicPhotos.splice(i, 1);
+          rerenderPhotoGrid();
+        });
+      });
+    }
+    async function onPhotoChange(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      if (draft.publicPhotos.length >= 3) { toast('Max 3 photos.'); return; }
+      try {
+        toast('Compressing photo…');
+        const dataUrl = await compressImage(file, 800, 0.6);
+        draft.publicPhotos.push(dataUrl);
+        rerenderPhotoGrid();
+      } catch (err) { toast('Photo failed: ' + err.message); }
+    }
+
     // Public photos: add
     const ppInput = $sheetBody.querySelector('#ps-photo');
     if (ppInput) {
-      ppInput.addEventListener('change', async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        if (draft.publicPhotos.length >= 3) { toast('Max 3 photos.'); return; }
-        try {
-          toast('Compressing photo…');
-          const dataUrl = await compressImage(file, 800, 0.6);
-          draft.publicPhotos.push(dataUrl);
-          render();
-        } catch (err) { toast('Photo failed: ' + err.message); }
-      });
+      ppInput.addEventListener('change', onPhotoChange);
     }
     // Public photos: delete
     $sheetBody.querySelectorAll('[data-pp-rm]').forEach(btn => {
@@ -3765,7 +3795,7 @@ function openPublishSaleSheet({ editPublicId = null } = {}) {
         e.stopPropagation();
         const i = parseInt(btn.dataset.ppRm, 10);
         draft.publicPhotos.splice(i, 1);
-        render();
+        rerenderPhotoGrid();
       });
     });
 
