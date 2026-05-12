@@ -2607,6 +2607,7 @@ window.Chat = (() => {
   let fb = null, db = null, auth = null, ready = false;
   let myUid = null;
   let blocked = false;
+  let isAdminUser = false;
   let activeTab = 'public';
   let activeUnsub = null;
   let badgeUnsubs = {};
@@ -2648,6 +2649,12 @@ window.Chat = (() => {
       blocked = !!snap.val();
       renderComposerState();
     });
+    // Admin check (for delete-any controls).
+    try {
+      if (window.PublicStops && window.PublicStops.isAdmin) {
+        isAdminUser = !!(await window.PublicStops.isAdmin());
+      }
+    } catch (e) { isAdminUser = false; }
     ready = true;
     attachBadge('public');
     attachBadge('group');
@@ -2792,6 +2799,9 @@ window.Chat = (() => {
     list.querySelectorAll('.ch-flag[data-id]').forEach(btn => {
       btn.addEventListener('click', () => flagMessage(btn.dataset.id));
     });
+    list.querySelectorAll('.ch-admin-del[data-id]').forEach(btn => {
+      btn.addEventListener('click', () => adminDeleteMessage(btn.dataset.id));
+    });
   }
 
   function renderMsg(id, m) {
@@ -2801,13 +2811,16 @@ window.Chat = (() => {
     const myFlagged = m.flags && m.flags[myUid];
     const cls = mine ? 'mine' : '';
     const flagClass = flagCount >= 2 ? 'danger' : flagCount >= 1 ? 'warn' : '';
+    const adminBtn = isAdminUser
+      ? `<button class="ch-flag ch-admin-del" data-id="${id}" title="Admin: delete this message" style="color:#7f0000;">🛠️🗑️</button>`
+      : '';
     const meta = mine
-      ? `<div class="ch-meta">${fmtAgo(m.ts)}</div>`
+      ? `<div class="ch-meta">${fmtAgo(m.ts)} ${adminBtn}</div>`
       : `<div class="ch-meta"><b>${escapeHtml(m.name || 'Anonymous')}</b> · ${fmtAgo(m.ts)} ${
           myFlagged
             ? `<span class="ch-flag ${flagClass}" title="You flagged this">🚩 ${flagCount}</span>`
             : `<button class="ch-flag ${flagClass}" data-id="${id}" title="Flag as inappropriate">🚩 ${flagCount}</button>`
-        }</div>`;
+        } ${adminBtn}</div>`;
     return `<div class="ch-msg ${cls}">${meta}<div class="bubble">${escapeHtml(m.text || '')}</div></div>`;
   }
 
@@ -2893,6 +2906,33 @@ window.Chat = (() => {
         await fb.set(fb.ref(db, `userBlocks/${offenderUid}`), true);
       }
     } catch (e) { console.warn('strike failed', e); }
+  }
+
+  async function adminDeleteMessage(msgId) {
+    if (!ready || !isAdminUser) return;
+    const path = tabPath(activeTab);
+    if (!path) return;
+    const msg = (messages[activeTab] || {})[msgId];
+    if (!msg) return;
+    const preview = (msg.text || '').slice(0, 60);
+    if (!confirm(`ADMIN: delete this message for everyone?\n\n"${preview}"`)) return;
+    try {
+      await fb.remove(fb.ref(db, `${path}/${msgId}`));
+      try {
+        await fb.set(fb.ref(db, `modLog/${Date.now()}-${Math.random().toString(36).slice(2,8)}`), {
+          uid: msg.uid || null,
+          name: msg.name || 'Anonymous',
+          text: msg.text || '',
+          deletedAt: Date.now(),
+          deletedByAdmin: myUid,
+          channel: activeTab,
+        });
+      } catch (e) {}
+      toast('Deleted by admin.');
+    } catch (e) {
+      console.warn('admin delete failed', e);
+      toast('Admin delete failed (check Firebase rules).');
+    }
   }
 
   function wireUi() {
