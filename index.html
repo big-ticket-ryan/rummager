@@ -1351,6 +1351,20 @@ function renderSheet(s) {
 
     ${ownerSlashControls}
 
+    ${(isPublic && (s.publicPhotos && s.publicPhotos.length || isMine)) ? `
+      <label>Seller photos${isMine ? ` (${(s.publicPhotos || []).length} / 3)` : ''}</label>
+      ${isMine ? `<div style="font-size:0.78rem;color:var(--c-muted);margin-bottom:4px;">Visible to all shoppers. Up to 3.</div>` : ''}
+      <div class="photo-grid" id="public-photo-grid">
+        ${(s.publicPhotos || []).map((p, i) => `<div class="ph" data-pubphoto-idx="${i}" style="position:relative;">
+          <img src="${p}" alt="">
+          ${isMine ? `<button class="h-rm" data-pubphoto-rm="${i}" style="position:absolute;top:2px;right:2px;padding:2px 6px;font-size:0.75rem;">×</button>` : ''}
+        </div>`).join('')}
+        ${(isMine && (s.publicPhotos || []).length < 3) ? `<label class="ph add" for="f-pubphoto">＋
+          <input type="file" id="f-pubphoto" accept="image/*" capture="environment" style="display:none">
+        </label>` : ''}
+      </div>
+    ` : ''}
+
     <label>Photos (${s.photos.length})</label>
     <div class="photo-grid" id="photo-grid">
       ${s.photos.map((p, i) => `<div class="ph" data-photo-idx="${i}"><img src="${p}" alt=""></div>`).join('')}
@@ -1534,6 +1548,62 @@ function wireSheet(s) {
   $sheetBody.querySelectorAll('[data-photo-idx]').forEach(el => {
     el.addEventListener('click', () => openLightbox(s.id, parseInt(el.dataset.photoIdx, 10)));
   });
+
+  // Public (seller) photos: owner add
+  const $pubPhotoInput = $sheetBody.querySelector('#f-pubphoto');
+  if ($pubPhotoInput && isMine) {
+    $pubPhotoInput.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const cur = (s.publicPhotos || []).slice(0, 3);
+      if (cur.length >= 3) { toast('Max 3 seller photos.'); return; }
+      try {
+        toast('Compressing photo…');
+        const dataUrl = await compressImage(file, 800, 0.6);
+        cur.push(dataUrl);
+        const ok = await window.PublicStops.update(s.publicId, { publicPhotos: cur });
+        if (ok) {
+          s.publicPhotos = cur;
+          $sheetBody.innerHTML = renderSheet(s);
+          wireSheet(s);
+          toast('Photo added.');
+        } else { toast('Upload failed.'); }
+      } catch (err) { toast('Photo failed: ' + err.message); }
+    });
+  }
+  // Public photos: owner delete
+  if (isMine) {
+    $sheetBody.querySelectorAll('[data-pubphoto-rm]').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (!confirm('Delete this seller photo?')) return;
+        const i = parseInt(btn.dataset.pubphotoRm, 10);
+        const cur = (s.publicPhotos || []).slice();
+        cur.splice(i, 1);
+        const ok = await window.PublicStops.update(s.publicId, { publicPhotos: cur });
+        if (ok) {
+          s.publicPhotos = cur;
+          $sheetBody.innerHTML = renderSheet(s);
+          wireSheet(s);
+          toast('Photo deleted.');
+        } else { toast('Delete failed.'); }
+      });
+    });
+  }
+  // Public photos: tap to view full-size (everyone)
+  $sheetBody.querySelectorAll('[data-pubphoto-idx]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      // Don't open lightbox if user clicked the delete button inside
+      if (e.target.closest('[data-pubphoto-rm]')) return;
+      const i = parseInt(el.dataset.pubphotoIdx, 10);
+      const url = (s.publicPhotos || [])[i];
+      if (!url) return;
+      $lbImg.src = url;
+      lbStopId = '__readonly__'; // sentinel: lightbox delete should no-op
+      lbIdx = -1;
+      $lb.classList.add('open');
+    });
+  });
 }
 
 $sheetBg.addEventListener('click', closeSheet);
@@ -1585,6 +1655,7 @@ function closeLightbox() { $lb.classList.remove('open'); lbStopId = null; lbIdx 
 document.getElementById('lb-close').addEventListener('click', closeLightbox);
 document.getElementById('lb-delete').addEventListener('click', () => {
   if (lbStopId == null) return;
+  if (lbStopId === '__readonly__' || lbIdx < 0) { toast('Read-only photo.'); return; }
   const s = findStop(lbStopId);
   if (s && confirm('Delete this photo?')) {
     s.photos.splice(lbIdx, 1);
@@ -3582,6 +3653,7 @@ function openPublishSaleSheet({ editPublicId = null } = {}) {
     lon: existing ? existing.lon : null,
     pinVerified: existing ? !!existing.pinVerified : false,
     hours: existing ? (existing.hours || []).slice() : [],
+    publicPhotos: existing ? ((existing.publicPhotos || []).slice(0, 3)) : [],
   };
 
   function render() {
@@ -3612,6 +3684,13 @@ function openPublishSaleSheet({ editPublicId = null } = {}) {
       <div class="hours-editor" id="ps-hours-editor">
         ${draft.hours.map((h, i) => hoursRowHtml(h, i)).join('')}
         <button class="h-add" id="ps-hours-add">+ Add a day</button>
+      </div>
+
+      <label>Public photos (${draft.publicPhotos.length} / 3)</label>
+      <div style="font-size:0.78rem;color:var(--c-muted);margin-bottom:4px;">Visible to all shoppers. Up to 3.</div>
+      <div class="photo-grid" id="ps-photo-grid">
+        ${draft.publicPhotos.map((p, i) => `<div class="ph" data-pp-idx="${i}" style="position:relative;"><img src="${p}" alt=""><button class="h-rm" data-pp-rm="${i}" style="position:absolute;top:2px;right:2px;padding:2px 6px;font-size:0.75rem;">×</button></div>`).join('')}
+        ${draft.publicPhotos.length < 3 ? `<label class="ph add" for="ps-photo">＋<input type="file" id="ps-photo" accept="image/*" capture="environment" style="display:none"></label>` : ''}
       </div>
 
       <div class="sheet-actions" style="margin-top:14px;">
@@ -3665,6 +3744,31 @@ function openPublishSaleSheet({ editPublicId = null } = {}) {
     $sheetBody.querySelector('#ps-items').addEventListener('input', e => draft.items = e.target.value);
     $sheetBody.querySelector('#ps-addr').addEventListener('input', e => draft.addr = e.target.value);
 
+    // Public photos: add
+    const ppInput = $sheetBody.querySelector('#ps-photo');
+    if (ppInput) {
+      ppInput.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        if (draft.publicPhotos.length >= 3) { toast('Max 3 photos.'); return; }
+        try {
+          toast('Compressing photo…');
+          const dataUrl = await compressImage(file, 800, 0.6);
+          draft.publicPhotos.push(dataUrl);
+          render();
+        } catch (err) { toast('Photo failed: ' + err.message); }
+      });
+    }
+    // Public photos: delete
+    $sheetBody.querySelectorAll('[data-pp-rm]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const i = parseInt(btn.dataset.ppRm, 10);
+        draft.publicPhotos.splice(i, 1);
+        render();
+      });
+    });
+
     // Pin geocode + verify
     $sheetBody.querySelector('#ps-pin').addEventListener('click', async () => {
       // Persist current text values into draft first
@@ -3715,6 +3819,7 @@ function openPublishSaleSheet({ editPublicId = null } = {}) {
         items: draft.items, addr: draft.addr, area: draft.area,
         lat: draft.lat, lon: draft.lon, pinVerified: !!draft.pinVerified,
         hours: draft.hours,
+        publicPhotos: draft.publicPhotos.slice(0, 3),
       };
 
       if (editing) {
