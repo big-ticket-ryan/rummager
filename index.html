@@ -12,8 +12,8 @@
   // Firebase SDK — imported as ES modules. Exposed on window for the inline script below.
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
   import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-  import { getDatabase, ref, set, update, onValue, onDisconnect, serverTimestamp, remove, get, runTransaction, increment, child } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js";
-  window.__firebase = { initializeApp, getAuth, signInAnonymously, onAuthStateChanged, getDatabase, ref, set, update, onValue, onDisconnect, serverTimestamp, remove, get, runTransaction, increment, child };
+  import { getDatabase, ref, set, update, onValue, off, onDisconnect, serverTimestamp, remove, get, runTransaction, increment, child, push, query, limitToLast } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js";
+  window.__firebase = { initializeApp, getAuth, signInAnonymously, onAuthStateChanged, getDatabase, ref, set, update, onValue, off, onDisconnect, serverTimestamp, remove, get, runTransaction, increment, child, push, query, limitToLast };
   window.dispatchEvent(new Event('firebase-ready'));
 </script>
 <style>
@@ -238,6 +238,104 @@
   }
   #fab:active { transform: scale(0.95); }
   #fab.busy { background: #888; }
+
+  /* Chat FAB — stacked above the + FAB */
+  #chat-fab {
+    position: fixed; bottom: 84px; right: 16px; z-index: 700;
+    width: 56px; height: 56px; border-radius: 50%;
+    background: #34495e; color: white; font-size: 1.5rem;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; border: none;
+  }
+  #chat-fab:active { transform: scale(0.95); }
+  #chat-fab .badge-unread {
+    position: absolute; top: 4px; right: 4px;
+    min-width: 16px; height: 16px; padding: 0 4px;
+    background: #e74c3c; color: white; font-size: 0.65rem; font-weight: 700;
+    border-radius: 8px; display: none; align-items: center; justify-content: center;
+    border: 2px solid white;
+  }
+  #chat-fab.has-unread .badge-unread { display: flex; }
+
+  /* Chat slide-in panel */
+  #chat-panel {
+    position: fixed; top: 0; right: 0; bottom: 0; z-index: 1400;
+    width: 100vw; max-width: 420px;
+    background: white; box-shadow: -4px 0 16px rgba(0,0,0,0.25);
+    transform: translateX(100%); transition: transform 0.25s ease;
+    display: flex; flex-direction: column;
+  }
+  #chat-panel.open { transform: translateX(0); }
+  #chat-panel .ch-header {
+    display: flex; align-items: stretch;
+    border-bottom: 1px solid var(--c-border);
+    background: #fff;
+  }
+  #chat-panel .ch-tabs { display: flex; flex: 1; }
+  #chat-panel .ch-tab {
+    flex: 1; padding: 12px 8px; font-size: 0.9rem; font-weight: 600;
+    background: white; border: none; color: var(--c-muted); cursor: pointer;
+    border-bottom: 3px solid transparent;
+  }
+  #chat-panel .ch-tab.active { color: var(--c-me); border-bottom-color: var(--c-me); }
+  #chat-panel .ch-close {
+    width: 48px; background: white; border: none; color: var(--c-text);
+    font-size: 1.4rem; cursor: pointer;
+  }
+  #chat-panel .ch-close:active { background: #eee; }
+  #chat-panel .ch-list {
+    flex: 1; overflow-y: auto; padding: 10px;
+    background: #f7f9fb; display: flex; flex-direction: column; gap: 8px;
+  }
+  #chat-panel .ch-empty {
+    margin: auto; padding: 20px; text-align: center; color: var(--c-muted);
+    font-size: 0.9rem;
+  }
+  #chat-panel .ch-empty button {
+    margin-top: 10px; padding: 8px 14px; border-radius: 8px;
+    background: var(--c-me); color: white; border: none; font-weight: 600;
+  }
+  #chat-panel .ch-msg { display: flex; flex-direction: column; max-width: 85%; }
+  #chat-panel .ch-msg.mine { align-self: flex-end; align-items: flex-end; }
+  #chat-panel .ch-msg .bubble {
+    padding: 8px 10px; border-radius: 12px;
+    background: white; border: 1px solid var(--c-border);
+    font-size: 0.88rem; line-height: 1.3; word-wrap: break-word;
+  }
+  #chat-panel .ch-msg.mine .bubble { background: #d6e9f5; border-color: #b3d4ec; }
+  #chat-panel .ch-msg.system { align-self: center; max-width: 90%; }
+  #chat-panel .ch-msg.system .bubble { background: transparent; border: none; color: var(--c-muted); font-style: italic; font-size: 0.78rem; padding: 2px 4px; }
+  #chat-panel .ch-meta {
+    font-size: 0.7rem; color: var(--c-muted);
+    display: flex; gap: 6px; align-items: center;
+    margin-bottom: 2px;
+  }
+  #chat-panel .ch-msg.mine .ch-meta { justify-content: flex-end; }
+  #chat-panel .ch-flag {
+    background: none; border: none; cursor: pointer; padding: 2px 4px;
+    font-size: 0.75rem; color: var(--c-muted); border-radius: 4px;
+  }
+  #chat-panel .ch-flag:active { background: #eee; }
+  #chat-panel .ch-flag.warn { color: #e67e22; }
+  #chat-panel .ch-flag.danger { color: #c0392b; font-weight: 700; }
+  #chat-panel .ch-composer {
+    display: flex; gap: 6px; padding: 8px;
+    border-top: 1px solid var(--c-border); background: white;
+  }
+  #chat-panel .ch-composer input {
+    flex: 1; padding: 9px 12px; border: 1px solid var(--c-border);
+    border-radius: 18px; font-size: 0.9rem;
+  }
+  #chat-panel .ch-composer button {
+    padding: 0 16px; background: var(--c-me); color: white; font-weight: 600;
+    border: none; border-radius: 18px; cursor: pointer; font-size: 0.9rem;
+  }
+  #chat-panel .ch-composer button:disabled { background: #aaa; cursor: not-allowed; }
+  #chat-panel .ch-blocked {
+    padding: 14px; background: #fff3cd; color: #856404;
+    text-align: center; font-size: 0.85rem; border-top: 1px solid #ffe69c;
+  }
 
   /* ── List entries ── */
   .entry {
@@ -573,6 +671,29 @@
 </div>
 
 <button id="fab" title="Add a stop or publish a public sale">➕</button>
+
+<button id="chat-fab" title="Open chat" aria-label="Open chat">
+  💬<span class="badge-unread" id="chat-unread">•</span>
+</button>
+
+<!-- Chat slide-in panel -->
+<div id="chat-panel" aria-hidden="true">
+  <div class="ch-header">
+    <div class="ch-tabs">
+      <button class="ch-tab active" data-tab="public">Public</button>
+      <button class="ch-tab" data-tab="group">Group</button>
+    </div>
+    <button class="ch-close" id="chat-close" aria-label="Close chat">✕</button>
+  </div>
+  <div class="ch-list" id="chat-list"></div>
+  <div class="ch-composer" id="chat-composer">
+    <input type="text" id="chat-input" placeholder="Type a message…" maxlength="500" enterkeyhint="send" />
+    <button id="chat-send" type="button">Send</button>
+  </div>
+  <div class="ch-blocked" id="chat-blocked" style="display:none;">
+    You've been blocked from chat after multiple messages were removed by the community.
+  </div>
+</div>
 
 <!-- + FAB menu -->
 <div id="fab-menu-bg"></div>
@@ -1510,7 +1631,7 @@ $searchClear.addEventListener('click', () => {
   updateSearchClearVisibility();
   clearTimeout(searchT);
   renderList();
-  $search.focus();
+  $search.blur();
 });
 updateSearchClearVisibility();
 
@@ -1605,6 +1726,7 @@ function startWatching(opts = { center: false }) {
     },
     { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
   );
+  resetGpsIdleTimer();
   return true;
 }
 
@@ -1621,9 +1743,47 @@ function stopWatching() {
   if (window.Group && Group.isSharing()) Group.stopSharing('GPS turned off');
 }
 
+// ── Auto-disable GPS after idle, auto-resume on next map interaction ──
+const GPS_IDLE_MS = 10 * 60 * 1000; // 10 minutes
+let gpsIdleTimer = null;
+let gpsAutoDisabled = false; // true only when stopped by idle timer (eligible for auto-resume)
+
+function resetGpsIdleTimer() {
+  if (gpsIdleTimer) clearTimeout(gpsIdleTimer);
+  if (!gpsEnabled) return;
+  gpsIdleTimer = setTimeout(() => {
+    if (!gpsEnabled) return;
+    // Don't auto-stop if actively sharing live location with the group
+    if (window.Group && Group.isSharing && Group.isSharing()) {
+      resetGpsIdleTimer();
+      return;
+    }
+    stopWatching();
+    gpsAutoDisabled = true;
+    toast('GPS paused (idle). Pan or tap the map to resume.');
+  }, GPS_IDLE_MS);
+}
+
+function onMapInteraction() {
+  if (gpsAutoDisabled && !gpsEnabled) {
+    gpsAutoDisabled = false;
+    startWatching({ center: false });
+    toast('GPS resumed.');
+  }
+  resetGpsIdleTimer();
+}
+// Map events that count as user interaction
+map.on('movestart zoomstart click', onMapInteraction);
+
 function toggleGps() {
-  if (gpsEnabled) stopWatching();
-  else startWatching({ center: true });
+  if (gpsEnabled) {
+    stopWatching();
+    gpsAutoDisabled = false; // user explicitly off — do not auto-resume
+  } else {
+    gpsAutoDisabled = false;
+    startWatching({ center: true });
+    resetGpsIdleTimer();
+  }
 }
 
 document.getElementById('gps-toggle').addEventListener('click', toggleGps);
@@ -1953,6 +2113,7 @@ window.Group = (() => {
     unsubscribeMembers = fb.onValue(membersRef, (snap) => {
       applyMembersSnapshot(snap.val() || {});
     });
+    if (window.Chat && window.Chat.refreshGroupBinding) window.Chat.refreshGroupBinding();
     return true;
   }
 
@@ -1963,6 +2124,7 @@ window.Group = (() => {
     currentGroup = null;
     pref.currentGroupCode = null;
     savePref();
+    if (window.Chat && window.Chat.refreshGroupBinding) window.Chat.refreshGroupBinding();
   }
 
   async function startSharing() {
@@ -2421,6 +2583,328 @@ window.PublicStops = (() => {
 })();
 // (Old "Save/Flag/Ignore" public-stop sheet removed — public sales are now
 //  auto-merged into the local list and use the regular detail sheet.)
+
+// ──────────────────────────────────────────────────────────────────────────
+// Chat — public + group channels with community moderation.
+//   /chats/public/messages/{msgId}
+//   /chats/group/{groupCode}/messages/{msgId}
+//   3 flags -> auto-delete; 3 deleted msgs by same author -> auto-block.
+// ──────────────────────────────────────────────────────────────────────────
+window.Chat = (() => {
+  const MAX_LEN = 500;
+  const PAGE_SIZE = 50;
+  const FLAG_LIMIT = 3;
+  const STRIKE_LIMIT = 3;
+  const LAST_SEEN_KEY = 'rummager.chat.lastSeen.v1';
+
+  let fb = null, db = null, auth = null, ready = false;
+  let myUid = null;
+  let blocked = false;
+  let activeTab = 'public';
+  let activeUnsub = null;
+  let badgeUnsubs = {};
+  let unreadByTab = { public: false, group: false };
+  let lastSeen = loadLastSeen();
+  let messages = { public: {}, group: {} };
+  let panelOpen = false;
+
+  function loadLastSeen() {
+    try { return JSON.parse(localStorage.getItem(LAST_SEEN_KEY) || '{}'); }
+    catch (e) { return {}; }
+  }
+  function saveLastSeen() {
+    try { localStorage.setItem(LAST_SEEN_KEY, JSON.stringify(lastSeen)); } catch (e) {}
+  }
+
+  function tabPath(tab) {
+    if (tab === 'public') return 'chats/public/messages';
+    const code = window.Group && window.Group.currentGroup;
+    if (!code) return null;
+    return `chats/group/${code}/messages`;
+  }
+  function lastSeenKeyFor(tab) {
+    if (tab === 'public') return 'public';
+    const code = window.Group && window.Group.currentGroup;
+    return code ? `group:${code}` : null;
+  }
+
+  async function init() {
+    if (ready) return true;
+    if (!window.Group || !window.Group.isConfigured()) return false;
+    if (!await window.Group.initFirebase()) return false;
+    fb = window.__firebase;
+    auth = fb.getAuth();
+    db = fb.getDatabase();
+    myUid = auth.currentUser ? auth.currentUser.uid : null;
+    if (!myUid) return false;
+    fb.onValue(fb.ref(db, `userBlocks/${myUid}`), (snap) => {
+      blocked = !!snap.val();
+      renderComposerState();
+    });
+    ready = true;
+    attachBadge('public');
+    attachBadge('group');
+    return true;
+  }
+
+  function attachBadge(tab) {
+    if (badgeUnsubs[tab]) { badgeUnsubs[tab](); badgeUnsubs[tab] = null; }
+    const path = tabPath(tab);
+    if (!path) return;
+    const q = fb.query(fb.ref(db, path), fb.limitToLast(1));
+    badgeUnsubs[tab] = fb.onValue(q, (snap) => {
+      const val = snap.val() || {};
+      const seenKey = lastSeenKeyFor(tab);
+      const seen = (seenKey && lastSeen[seenKey]) || 0;
+      let isUnread = false;
+      Object.values(val).forEach(m => {
+        if (!m || m.uid === myUid) return;
+        if ((m.ts || 0) > seen) isUnread = true;
+      });
+      unreadByTab[tab] = isUnread;
+      updateBadge();
+    });
+  }
+
+  function refreshGroupBinding() {
+    if (!ready) return;
+    attachBadge('group');
+    if (panelOpen && activeTab === 'group') subscribeActive();
+  }
+
+  function updateBadge() {
+    const fab = document.getElementById('chat-fab');
+    if (!fab) return;
+    fab.classList.toggle('has-unread', unreadByTab.public || unreadByTab.group);
+  }
+
+  function open() {
+    panelOpen = true;
+    document.getElementById('chat-panel').classList.add('open');
+    init().then(ok => {
+      if (!ok) {
+        renderEmpty('Chat requires Firebase configuration.');
+        return;
+      }
+      subscribeActive();
+    });
+  }
+  function close() {
+    panelOpen = false;
+    document.getElementById('chat-panel').classList.remove('open');
+    if (activeUnsub) { activeUnsub(); activeUnsub = null; }
+  }
+  function setTab(tab) {
+    if (activeTab === tab) return;
+    activeTab = tab;
+    document.querySelectorAll('#chat-panel .ch-tab').forEach(b => {
+      b.classList.toggle('active', b.dataset.tab === tab);
+    });
+    if (activeUnsub) { activeUnsub(); activeUnsub = null; }
+    if (panelOpen && ready) subscribeActive();
+  }
+
+  function subscribeActive() {
+    const tab = activeTab;
+    const path = tabPath(tab);
+    if (!path) {
+      if (tab === 'group') renderGroupCta();
+      else renderEmpty('No public chatter yet.');
+      return;
+    }
+    messages[tab] = {};
+    const q = fb.query(fb.ref(db, path), fb.limitToLast(PAGE_SIZE));
+    activeUnsub = fb.onValue(q, (snap) => {
+      messages[tab] = snap.val() || {};
+      if (panelOpen && activeTab === tab) {
+        renderList();
+        markSeen();
+      }
+    });
+  }
+
+  function markSeen() {
+    const seenKey = lastSeenKeyFor(activeTab);
+    if (!seenKey) return;
+    const tabMsgs = messages[activeTab] || {};
+    let maxTs = lastSeen[seenKey] || 0;
+    Object.values(tabMsgs).forEach(m => { if (m && m.ts && m.ts > maxTs) maxTs = m.ts; });
+    lastSeen[seenKey] = maxTs;
+    saveLastSeen();
+    unreadByTab[activeTab] = false;
+    updateBadge();
+  }
+
+  function renderEmpty(msg) {
+    document.getElementById('chat-list').innerHTML = `<div class="ch-empty">${escapeHtml(msg)}</div>`;
+  }
+  function renderGroupCta() {
+    const list = document.getElementById('chat-list');
+    list.innerHTML = `<div class="ch-empty">
+      Join or create a group to chat with friends.
+      <br><button id="ch-join-group">Open group sheet</button>
+    </div>`;
+    document.getElementById('ch-join-group').addEventListener('click', () => {
+      close();
+      openGroupSheet();
+    });
+  }
+
+  function fmtAgo(ts) {
+    if (!ts) return '';
+    const s = Math.floor((Date.now() - ts) / 1000);
+    if (s < 45) return 'just now';
+    if (s < 3600) return Math.floor(s / 60) + 'm ago';
+    if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+    return Math.floor(s / 86400) + 'd ago';
+  }
+
+  function renderList() {
+    const list = document.getElementById('chat-list');
+    const tabMsgs = messages[activeTab] || {};
+    const entries = Object.entries(tabMsgs).sort((a, b) => (a[1].ts || 0) - (b[1].ts || 0));
+    if (entries.length === 0) {
+      renderEmpty(activeTab === 'public' ? 'No public chatter yet.' : 'Be the first to say hi 👋');
+      return;
+    }
+    list.innerHTML = entries.map(([id, m]) => renderMsg(id, m)).join('');
+    list.scrollTop = list.scrollHeight;
+    list.querySelectorAll('.ch-flag[data-id]').forEach(btn => {
+      btn.addEventListener('click', () => flagMessage(btn.dataset.id));
+    });
+  }
+
+  function renderMsg(id, m) {
+    if (!m) return '';
+    const mine = m.uid === myUid;
+    const flagCount = m.flagCount || 0;
+    const myFlagged = m.flags && m.flags[myUid];
+    const cls = mine ? 'mine' : '';
+    const flagClass = flagCount >= 2 ? 'danger' : flagCount >= 1 ? 'warn' : '';
+    const meta = mine
+      ? `<div class="ch-meta">${fmtAgo(m.ts)}</div>`
+      : `<div class="ch-meta"><b>${escapeHtml(m.name || 'Anonymous')}</b> · ${fmtAgo(m.ts)} ${
+          myFlagged
+            ? `<span class="ch-flag ${flagClass}" title="You flagged this">🚩 ${flagCount}</span>`
+            : `<button class="ch-flag ${flagClass}" data-id="${id}" title="Flag as inappropriate">🚩 ${flagCount}</button>`
+        }</div>`;
+    return `<div class="ch-msg ${cls}">${meta}<div class="bubble">${escapeHtml(m.text || '')}</div></div>`;
+  }
+
+  function renderComposerState() {
+    const composer = document.getElementById('chat-composer');
+    const blockedEl = document.getElementById('chat-blocked');
+    if (!composer || !blockedEl) return;
+    if (blocked) { composer.style.display = 'none'; blockedEl.style.display = 'block'; }
+    else { composer.style.display = 'flex'; blockedEl.style.display = 'none'; }
+  }
+
+  async function send(text) {
+    if (!ready) return;
+    if (blocked) { toast("You're blocked from chat."); return; }
+    const path = tabPath(activeTab);
+    if (!path) {
+      if (activeTab === 'group') toast('Join a group first.');
+      return;
+    }
+    const trimmed = text.trim().slice(0, MAX_LEN);
+    if (!trimmed) return;
+    const name = (window.Group && window.Group.pref.name) || 'Anonymous';
+    try {
+      const newRef = fb.push(fb.ref(db, path));
+      await fb.set(newRef, {
+        uid: myUid, name, text: trimmed,
+        ts: Date.now(), flagCount: 0, flags: {},
+      });
+    } catch (e) {
+      console.warn('chat send failed', e);
+      toast('Send failed.');
+    }
+  }
+
+  async function flagMessage(msgId) {
+    if (!ready || blocked) return;
+    const path = tabPath(activeTab);
+    if (!path) return;
+    const msg = (messages[activeTab] || {})[msgId];
+    if (!msg) return;
+    if (msg.uid === myUid) { toast("You can't flag your own message."); return; }
+    if (msg.flags && msg.flags[myUid]) { toast('Already flagged.'); return; }
+    const msgRef = fb.ref(db, `${path}/${msgId}`);
+    try {
+      const result = await fb.runTransaction(msgRef, (cur) => {
+        if (!cur) return cur;
+        cur.flags = cur.flags || {};
+        if (cur.flags[myUid]) return cur;
+        cur.flags[myUid] = true;
+        cur.flagCount = (cur.flagCount || 0) + 1;
+        return cur;
+      });
+      const after = result && result.snapshot ? result.snapshot.val() : null;
+      if (after && after.flagCount >= FLAG_LIMIT) {
+        const offenderUid = after.uid;
+        await fb.remove(msgRef);
+        await applyStrike(offenderUid, after);
+        toast('Message removed by community.');
+      } else {
+        toast('Flagged.');
+      }
+    } catch (e) {
+      console.warn('flag failed', e);
+      toast('Flag failed.');
+    }
+  }
+
+  async function applyStrike(offenderUid, deletedMsg) {
+    if (!offenderUid) return;
+    const strikeRef = fb.ref(db, `userStrikes/${offenderUid}/deleted`);
+    try {
+      const result = await fb.runTransaction(strikeRef, (cur) => (cur || 0) + 1);
+      const newCount = result && result.snapshot ? result.snapshot.val() : 0;
+      try {
+        await fb.set(fb.ref(db, `modLog/${Date.now()}-${Math.random().toString(36).slice(2,8)}`), {
+          uid: offenderUid,
+          name: deletedMsg.name || 'Anonymous',
+          text: deletedMsg.text || '',
+          deletedAt: Date.now(),
+        });
+      } catch (e) {}
+      if (newCount >= STRIKE_LIMIT) {
+        await fb.set(fb.ref(db, `userBlocks/${offenderUid}`), true);
+      }
+    } catch (e) { console.warn('strike failed', e); }
+  }
+
+  function wireUi() {
+    const fab = document.getElementById('chat-fab');
+    const closeBtn = document.getElementById('chat-close');
+    const sendBtn = document.getElementById('chat-send');
+    const input = document.getElementById('chat-input');
+    if (!fab) return;
+    fab.addEventListener('click', open);
+    closeBtn.addEventListener('click', close);
+    document.querySelectorAll('#chat-panel .ch-tab').forEach(b => {
+      b.addEventListener('click', () => setTab(b.dataset.tab));
+    });
+    sendBtn.addEventListener('click', () => {
+      const v = input.value;
+      if (!v.trim()) return;
+      input.value = '';
+      send(v);
+    });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const v = input.value;
+        if (!v.trim()) return;
+        input.value = '';
+        send(v);
+      }
+    });
+  }
+
+  return { init, open, close, setTab, refreshGroupBinding, wireUi };
+})();
 
 // ──────────────────────────────────────────────────────────────────────────
 // Usage stats — anonymous, opt-in by virtue of using the app.
@@ -3264,6 +3748,10 @@ window.PublicStops.init().catch(e => console.warn('PublicStops init failed', e))
 
 // Initialize anonymous usage stats (visit counter + presence)
 window.Stats.init().catch(e => console.warn('Stats init failed', e));
+
+// Wire chat UI + initialize chat (lightweight unread listeners)
+window.Chat.wireUi();
+window.Chat.init().catch(e => console.warn('Chat init failed', e));
 
 // (No preloaded seeds in Fredonia — nothing to geocode at boot.)
 
