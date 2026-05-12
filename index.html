@@ -35,7 +35,7 @@
 
   /* ── Header ── */
   #header {
-    background: #b8e0a4; color: #1f3a1f;
+    background: #8fc97a; color: #1f3a1f;
     padding: 0 12px; display: flex; align-items: center; gap: 8px;
     flex-shrink: 0;
   }
@@ -570,10 +570,6 @@
   <button id="menu-add-stop">
     <span class="ico">📍</span>
     <span class="lbl"><b>Add a stop (private)</b><span class="sub">Just for your map &mdash; not shared</span></span>
-  </button>
-  <button id="menu-add-gps">
-    <span class="ico">📡</span>
-    <span class="lbl"><b>Quick-add at my GPS</b><span class="sub">Drop a pin where I'm standing</span></span>
   </button>
 </div>
 
@@ -1616,10 +1612,18 @@ document.getElementById('map-recenter').addEventListener('click', () => {
 // ──────────────────────────────────────────────────────────────────────────
 function openAddSheet({ lat = null, lon = null, prefilledAddr = '', defaultStatus = 'unvisited' } = {}) {
   openSheetId = '__new';
+  // Mutable state — toggling "Use my GPS location" updates these
+  let curLat = lat;
+  let curLon = lon;
   $sheetBody.innerHTML = `
     <h2>Add stop</h2>
     <label>Address</label>
     <input type="text" id="n-addr" placeholder="123 Main St" value="${escapeHtml(prefilledAddr)}">
+    <label style="display:flex;align-items:center;gap:8px;margin-top:8px;text-transform:none;letter-spacing:0;font-size:0.85rem;color:var(--c-text);">
+      <input type="checkbox" id="n-use-gps" style="width:18px;height:18px;">
+      <span>📡 Use my current location for the address</span>
+    </label>
+    <div id="n-gps-status" style="margin-top:4px;font-size:0.75rem;color:var(--c-muted);min-height:1em;"></div>
     <label>Area (optional)</label>
     <input type="text" id="n-area" placeholder="Fredonia">
     <label>Note</label>
@@ -1636,10 +1640,23 @@ function openAddSheet({ lat = null, lon = null, prefilledAddr = '', defaultStatu
       <button class="btn-close" id="n-close">Cancel</button>
     </div>
     <div style="margin-top:8px;font-size:0.78rem;color:var(--c-muted);">This stop is private to you. To publish a sale that everyone in town can see, use <b>+ → Publish a public sale</b>.</div>
-    ${lat != null ? `<div style="margin-top:10px; font-size:0.78rem; color:var(--c-muted)">📍 Using GPS coords ${lat.toFixed(5)}, ${lon.toFixed(5)}</div>` : ''}
   `;
   $sheetBg.classList.add('open');
   $sheet.classList.add('open');
+
+  const $gpsToggle = $sheetBody.querySelector('#n-use-gps');
+  const $gpsStatus = $sheetBody.querySelector('#n-gps-status');
+  const $addr = $sheetBody.querySelector('#n-addr');
+
+  function updateGpsStatusLine() {
+    if (curLat != null && curLon != null) {
+      $gpsStatus.textContent = `📍 Using GPS coords ${curLat.toFixed(5)}, ${curLon.toFixed(5)}`;
+    } else {
+      $gpsStatus.textContent = '';
+    }
+  }
+  // If pre-seeded with coords (e.g. long-press add), show line immediately
+  updateGpsStatusLine();
 
   let chosenStatus = defaultStatus;
   $sheetBody.querySelectorAll('.status-row button').forEach(btn => {
@@ -1649,14 +1666,55 @@ function openAddSheet({ lat = null, lon = null, prefilledAddr = '', defaultStatu
     });
   });
 
+  $gpsToggle.addEventListener('change', () => {
+    if (!$gpsToggle.checked) {
+      // Turning off — clear coords (user may have toggled by mistake)
+      curLat = null; curLon = null;
+      updateGpsStatusLine();
+      return;
+    }
+    if (!navigator.geolocation) {
+      toast('Geolocation not supported.');
+      $gpsToggle.checked = false;
+      return;
+    }
+    $gpsStatus.textContent = '📡 Getting GPS fix…';
+    $gpsToggle.disabled = true;
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        curLat = pos.coords.latitude;
+        curLon = pos.coords.longitude;
+        lastKnownPos = { lat: curLat, lon: curLon };
+        startWatching();
+        updateGpsStatusLine();
+        $gpsStatus.textContent = '📍 Got fix — looking up address…';
+        const guess = await reverseGeocode(curLat, curLon);
+        if (guess) $addr.value = guess;
+        // Default newly-GPS-added stops to "visited" (you're on-site)
+        chosenStatus = 'visited';
+        $sheetBody.querySelectorAll('.status-row button').forEach(b => b.classList.toggle('active', b.dataset.status === 'visited'));
+        updateGpsStatusLine();
+        $gpsToggle.disabled = false;
+      },
+      (err) => {
+        toast('GPS error: ' + err.message);
+        $gpsToggle.checked = false;
+        $gpsToggle.disabled = false;
+        curLat = null; curLon = null;
+        updateGpsStatusLine();
+      },
+      { enableHighAccuracy: true, timeout: 20000 }
+    );
+  });
+
   $sheetBody.querySelector('#n-close').addEventListener('click', closeSheet);
 
   async function buildAndCommitStop() {
     const addr = $sheetBody.querySelector('#n-addr').value.trim();
     const area = $sheetBody.querySelector('#n-area').value.trim();
     const note = $sheetBody.querySelector('#n-note').value;
-    if (!addr && lat == null) { toast('Need an address or GPS coords.'); return null; }
-    let coords = (lat != null) ? { lat, lon } : null;
+    if (!addr && curLat == null) { toast('Need an address or GPS coords.'); return null; }
+    let coords = (curLat != null) ? { lat: curLat, lon: curLon } : null;
     if (!coords) {
       toast('Geocoding…');
       coords = await geocodeAddress(addr, area);
@@ -1669,7 +1727,7 @@ function openAddSheet({ lat = null, lon = null, prefilledAddr = '', defaultStatu
       area, items: '',
       lat: coords ? coords.lat : null,
       lon: coords ? coords.lon : null,
-      source: lat != null ? 'gps' : 'manual',
+      source: curLat != null ? 'gps' : 'manual',
       status: chosenStatus, note, photos: [],
       createdAt: now, updatedAt: now,
     };
@@ -2816,27 +2874,6 @@ document.getElementById('menu-publish').addEventListener('click', () => {
 document.getElementById('menu-add-stop').addEventListener('click', () => {
   closeFabMenu();
   openAddSheet();
-});
-document.getElementById('menu-add-gps').addEventListener('click', () => {
-  closeFabMenu();
-  if (!navigator.geolocation) { toast('Geolocation not supported.'); return; }
-  $fab.classList.add('busy');
-  toast('Getting GPS fix…');
-  navigator.geolocation.getCurrentPosition(
-    async (pos) => {
-      const lat = pos.coords.latitude, lon = pos.coords.longitude;
-      lastKnownPos = { lat, lon };
-      startWatching();
-      const guess = await reverseGeocode(lat, lon);
-      $fab.classList.remove('busy');
-      openAddSheet({ lat, lon, prefilledAddr: guess, defaultStatus: 'visited' });
-    },
-    (err) => {
-      $fab.classList.remove('busy');
-      toast('GPS error: ' + err.message);
-    },
-    { enableHighAccuracy: true, timeout: 20000 }
-  );
 });
 
 // ──────────────────────────────────────────────────────────────────────────
